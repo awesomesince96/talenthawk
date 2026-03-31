@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Engineering",
+    "keywords": [
+      "engineer",
+      "developer",
+      "software",
+      "devops",
+      "sre",
+      "backend",
+      "frontend",
+      "full stack",
+      "fullstack"
+    ]
+  },
+  {
+    "name": "Data & ML",
+    "keywords": [
+      "data scientist",
+      "data engineer",
+      "machine learning",
+      "ml engineer",
+      "analytics",
+      "bi developer"
+    ]
+  },
+  {
+    "name": "Product",
+    "keywords": [
+      "product manager",
+      "product owner",
+      "product lead",
+      "technical program"
+    ]
+  },
+  {
+    "name": "Design",
+    "keywords": [
+      "designer",
+      "ux",
+      "ui designer",
+      "product design"
+    ]
+  },
+  {
+    "name": "QA",
+    "keywords": [
+      "qa",
+      "quality assurance",
+      "test engineer",
+      "sdet"
+    ]
+  },
+  {
+    "name": "Security",
+    "keywords": [
+      "security",
+      "infosec",
+      "cyber"
+    ]
+  },
+  {
+    "name": "Management",
+    "keywords": [
+      "cto",
+      "vp engineering",
+      "head of engineering",
+      "engineering manager",
+      "director"
+    ]
+  }
+]
