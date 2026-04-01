@@ -52,15 +52,15 @@ High-level flow from source to UI:
 ```mermaid
 flowchart TB
     subgraph Sources
-        API["Remotive API\n(remote-jobs)"]
-        Disk[("jobs_cache.json\n(optional)")]
+        API["Remotive API (remote-jobs)"]
+        Disk[("jobs_cache.json (optional cache)")]
     end
 
-    subgraph Package["`talenthawk` package"]
-        F["`fetch_jobs`\nfetch + normalize"]
-        W["30-day window\n`filter_last_n_days`"]
-        C["`categorize`\nkeyword rules"]
-        S["`storage`\nJSON read/write"]
+    subgraph Core["talenthawk package"]
+        F["fetch_jobs.py: fetch and normalize"]
+        W["30-day window: filter_last_n_days"]
+        C["categorize.py: keyword rules"]
+        S["storage.py: JSON read and write"]
     end
 
     subgraph Rules["On-disk rules"]
@@ -69,11 +69,11 @@ flowchart TB
     end
 
     subgraph App["Streamlit app"]
-        UI["Tabs: Included / Filtered-out / Rules"]
+        UI["Tabs: Included, Filtered-out, Rules"]
     end
 
     API --> F
-    Disk -.->|Load from cache| F
+    Disk -.->|"load from cache"| F
     F --> W
     S --> BL
     S --> CK
