@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from talenthawk.settings import (
+    BLOCKLIST_2_FILE,
     BLOCKLIST_FILE,
     CATEGORY_KEYWORDS_FILE,
     DEFAULT_BLOCKLIST,
@@ -14,6 +15,8 @@ from talenthawk.settings import (
     JOBS_CACHE_FILE,
     PERSISTENCE_DIR,
 )
+
+_BLOCKLIST_PATHS = {1: BLOCKLIST_FILE, 2: BLOCKLIST_2_FILE}
 
 
 def _ensure_dir(path: Path) -> None:
@@ -34,16 +37,33 @@ def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def load_blocklist() -> list[str]:
-    raw = _read_json(BLOCKLIST_FILE, DEFAULT_BLOCKLIST.copy())
+def _normalize_blocklist(raw: object) -> list[str]:
     if not isinstance(raw, list):
         return list(DEFAULT_BLOCKLIST)
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
-def save_blocklist(companies: list[str]) -> None:
+def load_company_blocklist(slot: int) -> list[str]:
+    """Load blocklist 1 or 2 from disk (``slot`` is 1 or 2)."""
+    path = _BLOCKLIST_PATHS[slot]
+    raw = _read_json(path, DEFAULT_BLOCKLIST.copy())
+    return _normalize_blocklist(raw)
+
+
+def save_company_blocklist(slot: int, companies: list[str]) -> None:
+    path = _BLOCKLIST_PATHS[slot]
     cleaned = sorted({c.strip() for c in companies if c and c.strip()}, key=str.lower)
-    _write_json(BLOCKLIST_FILE, cleaned)
+    _write_json(path, cleaned)
+
+
+def load_blocklist() -> list[str]:
+    """Blocklist 1 (backward-compatible name for primary file)."""
+    return load_company_blocklist(1)
+
+
+def save_blocklist(companies: list[str]) -> None:
+    """Save blocklist 1 (backward-compatible)."""
+    save_company_blocklist(1, companies)
 
 
 def load_category_keywords() -> list[dict[str, Any]]:
@@ -82,6 +102,7 @@ def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
         "blocklist": BLOCKLIST_FILE,
+        "blocklist_2": BLOCKLIST_2_FILE,
         "category_keywords": CATEGORY_KEYWORDS_FILE,
         "jobs_cache": JOBS_CACHE_FILE,
     }

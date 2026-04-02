@@ -6,6 +6,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 PERSISTENCE_DIR = DATA_DIR / "persistence"
 
 BLOCKLIST_FILE = PERSISTENCE_DIR / "companies_blocklist.json"
+BLOCKLIST_2_FILE = PERSISTENCE_DIR / "companies_blocklist_2.json"
 CATEGORY_KEYWORDS_FILE = PERSISTENCE_DIR / "category_keywords.json"
 JOBS_CACHE_FILE = PERSISTENCE_DIR / "jobs_cache.json"
 
