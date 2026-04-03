@@ -2,7 +2,7 @@
 
 # TalentHawk
 
-**Local-first remote job intelligence** — ingest listings, apply your own category and company rules, and visualize what you keep versus what you filter out.
+**Local-first remote job intelligence** — ingest listings, apply category rules plus separate **title** and **company** filters, and visualize what you keep versus what is hidden.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io/)
@@ -39,9 +39,9 @@ Hiring pipelines are noisy: the same feed mixes roles you want with companies yo
 | **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`title`, `company`, `published_at`, `url`, `salary` when present, `source`). |
 | **Time window** | Keeps listings whose `published_at` falls in the **last 30 days** (UTC-aware parsing with fallbacks for odd date strings). |
 | **Categories** | Ordered keyword rules: **first matching category wins**; otherwise **Other**. Editable in the app or in JSON on disk. |
-| **Filters** | Separate **title** and **company** filter lists (case-insensitive substring rules). Add rules from **＋** buttons on each row or edit JSON in the sidebar. Removing a rule brings matching jobs back into the main table and charts. |
+| **Filters** | Separate **title** and **company** filter lists (case-insensitive substring rules, bidirectional match). Add rules from **＋** beside each row or edit lines in the sidebar; remove rules on **Filters & hidden jobs** or in JSON. |
 | **Resilience** | Optional on-disk `jobs_cache.json` when the API is unreachable; load or refresh from the sidebar. |
-| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on included rows, plus breakdowns for jobs hidden by each filter. |
+| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on **included** rows; **Filters & hidden jobs** shows charts and tables for listings hidden by the title or company filter. |
 
 ---
 
@@ -70,7 +70,7 @@ flowchart TB
     end
 
     subgraph App["Streamlit app"]
-        UI["Tabs: Included, Filters, Rules"]
+        UI["Tabs: Included jobs, Filters & hidden jobs, Category rules"]
     end
 
     API --> F
@@ -135,7 +135,7 @@ Files under `data/persistence/` (created on first run if missing):
 | `category_keywords.json` | Ordered rules: each category has **keywords**; the **first** category with a keyword hit in the job **title** wins; otherwise **Other**. |
 | `jobs_cache.json` | Optional snapshot of the last successful fetch (**gitignored**). Use **Save current listings to cache** / **Load from saved cache** in the sidebar. |
 
-You can edit JSON directly or use the sidebar and **Category rules** tab in the app.
+You can edit JSON directly or use the sidebar (filter text areas), **Filters & hidden jobs** (remove **✕** on a rule), and **Category rules** in the app.
 
 ---
 
@@ -143,7 +143,7 @@ You can edit JSON directly or use the sidebar and **Category rules** tab in the 
 
 - **Another job source:** Implement a fetcher that returns the same row shape as `fetch_remotive_jobs()` in [`talenthawk/fetch_jobs.py`](talenthawk/fetch_jobs.py), then merge results in the app (or extend the fetch module) before the 30-day filter.
 - **Different time window:** `filter_last_n_days(..., days=30)` is called from `streamlit_app.py`; adjust or expose as a control.
-- **Stricter matching:** `company_is_blocked` and `categorize_title` are small, test-friendly functions you can swap for regex, allowlists, or ML-backed labels without changing the UI layer.
+- **Stricter matching:** `matches_text_filter()` in [`talenthawk/fetch_jobs.py`](talenthawk/fetch_jobs.py) applies both title and company rules (`company_is_blocked` is a thin alias). `categorize_title` in [`talenthawk/categorize.py`](talenthawk/categorize.py) is equally easy to swap for regex, allowlists, or other labelers without changing the UI layer.
 
 ---
 
