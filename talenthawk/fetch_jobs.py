@@ -49,12 +49,14 @@ def fetch_remotive_jobs(timeout: float = 30.0) -> list[dict[str, Any]]:
         company = (j.get("company_name") or j.get("company") or "").strip()
         pub = j.get("publication_date") or j.get("created_at")
         url = j.get("url") or j.get("apply_url") or ""
+        salary = (j.get("salary") or "").strip()
         out.append(
             {
                 "title": title,
                 "company": company,
                 "published_at": str(pub) if pub else "",
                 "url": str(url) if url else "",
+                "salary": salary,
                 "source": "remotive",
                 "raw": j,
             }
@@ -76,14 +78,20 @@ def filter_last_n_days(jobs: list[dict[str, Any]], days: int = 30) -> list[dict[
     return kept
 
 
-def company_is_blocked(company: str, blocklist: list[str]) -> bool:
-    c = company.lower().strip()
+def matches_text_filter(value: str, patterns: list[str]) -> bool:
+    """True if ``value`` matches any pattern (case-insensitive): exact, substring either way."""
+    c = value.lower().strip()
     if not c:
         return False
-    for b in blocklist:
+    for b in patterns:
         bl = b.lower().strip()
         if not bl:
             continue
         if bl == c or bl in c or c in bl:
             return True
     return False
+
+
+def company_is_blocked(company: str, blocklist: list[str]) -> bool:
+    """Backward-compatible alias for :func:`matches_text_filter`."""
+    return matches_text_filter(company, blocklist)

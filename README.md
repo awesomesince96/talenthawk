@@ -16,7 +16,7 @@
 
 ## Why this exists
 
-Hiring pipelines are noisy: the same feed mixes roles you want with companies you would never apply to, and titles that need grouping before you can reason about volume. TalentHawk treats that as a **small data pipeline plus a decision UI**: fetch normalized rows, window by recency, classify titles with explicit rules, split on a blocklist, and surface **included vs. excluded** distributions so you can see *patterns*, not just a flat list.
+Hiring pipelines are noisy: the same feed mixes roles you want with companies you would never apply to, and titles that need grouping before you can reason about volume. TalentHawk treats that as a **small data pipeline plus a decision UI**: fetch normalized rows, window by recency, classify titles with explicit rules, apply **title and company filters** you control, and surface **included vs. hidden** distributions so you can see *patterns*, not just a flat list.
 
 ---
 
@@ -36,12 +36,12 @@ Hiring pipelines are noisy: the same feed mixes roles you want with companies yo
 
 | Area | What you get |
 |------|----------------|
-| **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`title`, `company`, `published_at`, `url`, `source`). |
+| **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`title`, `company`, `published_at`, `url`, `salary` when present, `source`). |
 | **Time window** | Keeps listings whose `published_at` falls in the **last 30 days** (UTC-aware parsing with fallbacks for odd date strings). |
 | **Categories** | Ordered keyword rules: **first matching category wins**; otherwise **Other**. Editable in the app or in JSON on disk. |
-| **Company blocklist** | Case-insensitive substring matching against company names; drives a separate **filtered-out** view and charts. |
+| **Filters** | Separate **title** and **company** filter lists (case-insensitive substring rules). Add rules from **＋** buttons on each row or edit JSON in the sidebar. Removing a rule brings matching jobs back into the main table and charts. |
 | **Resilience** | Optional on-disk `jobs_cache.json` when the API is unreachable; load or refresh from the sidebar. |
-| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix (included vs. excluded) and top blocked companies by volume. |
+| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on included rows, plus breakdowns for jobs hidden by each filter. |
 
 ---
 
@@ -64,20 +64,23 @@ flowchart TB
     end
 
     subgraph Rules["On-disk rules"]
-        BL["companies_blocklist.json"]
+        TF["title_filter.json"]
+        CF["company_filter.json"]
         CK["category_keywords.json"]
     end
 
     subgraph App["Streamlit app"]
-        UI["Tabs: Included, Filtered-out, Rules"]
+        UI["Tabs: Included, Filters, Rules"]
     end
 
     API --> F
     Disk -.->|"load from cache"| F
     F --> W
-    S --> BL
+    S --> TF
+    S --> CF
     S --> CK
-    BL --> UI
+    TF --> UI
+    CF --> UI
     CK --> C
     W --> C
     C --> UI
@@ -111,7 +114,7 @@ talenthawk/
 ├── pyproject.toml            # Package metadata and dependencies
 ├── uv.lock                   # Locked dependency versions
 ├── talenthawk/
-│   ├── fetch_jobs.py         # HTTP fetch, normalization, date window, blocklist helper
+│   ├── fetch_jobs.py         # HTTP fetch, normalization, date window, text-filter helper
 │   ├── categorize.py         # Title → category from ordered keyword rules
 │   ├── storage.py            # JSON persistence under data/persistence/
 │   └── settings.py           # Paths, defaults, API URL
@@ -127,7 +130,8 @@ Files under `data/persistence/` (created on first run if missing):
 
 | File | Role |
 |------|------|
-| `companies_blocklist.json` | Company names to **exclude** from the included tab and search. Matching is case-insensitive; entries can match as substrings (either direction). |
+| `title_filter.json` | Patterns matched against job **titles**; matching rows are hidden from the included tab and search. |
+| `company_filter.json` | Patterns matched against **company** names; same behavior. On first run, if this file is missing, legacy `companies_blocklist.json` / `companies_blocklist_2.json` are merged into it once. |
 | `category_keywords.json` | Ordered rules: each category has **keywords**; the **first** category with a keyword hit in the job **title** wins; otherwise **Other**. |
 | `jobs_cache.json` | Optional snapshot of the last successful fetch (**gitignored**). Use **Save current listings to cache** / **Load from saved cache** in the sidebar. |
 

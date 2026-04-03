@@ -1,11 +1,12 @@
 """
-TalentHawk — browse recent remote jobs, filter companies, and view category mix.
+TalentHawk — browse recent remote jobs, filter by title/company, and view category mix.
 
-Run: streamlit run streamlit_app.py
+Run: uv run streamlit run streamlit_app.py
 """
 
 from __future__ import annotations
 
+import html
 import json
 from datetime import datetime, timezone
 
@@ -15,24 +16,28 @@ import streamlit as st
 
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import (
-    company_is_blocked,
     fetch_remotive_jobs,
     filter_last_n_days,
+    matches_text_filter,
 )
-from talenthawk.settings import DEFAULT_BLOCKLIST, DEFAULT_CATEGORY_KEYWORDS
+from talenthawk.settings import DEFAULT_CATEGORY_KEYWORDS
 from talenthawk.storage import (
     load_category_keywords,
-    load_company_blocklist,
+    load_company_filters,
     load_jobs_cache,
+    load_title_filters,
+    migrate_legacy_company_blocklists_if_needed,
     persistence_paths,
-    save_blocklist,
     save_category_keywords,
-    save_company_blocklist,
+    save_company_filters,
     save_jobs_cache,
+    save_title_filters,
 )
 
 PAGE_SIZE = 25
-MAX_TITLE_LEN = 80
+MAX_TITLE_LEN = 72
+MAX_COMPANY_LEN = 36
+MAX_PAY_LEN = 28
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -42,45 +47,67 @@ def _truncate(text: str, max_len: int) -> str:
     return t[: max_len - 1] + "…"
 
 
-def sync_blocklist_drafts_from_disk() -> None:
-    st.session_state["blocklist_draft"] = "\n".join(load_company_blocklist(1))
-    st.session_state["blocklist_2_draft"] = "\n".join(load_company_blocklist(2))
+def sync_filter_drafts_from_disk() -> None:
+    """Load both filter text areas from disk. Only safe before those widgets are created this run."""
+    st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
+    st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
+
+
+def apply_pending_filter_draft_refreshes() -> None:
+    """Apply sidebar draft updates scheduled after a prior interaction (must run before filter text_areas)."""
+    if st.session_state.pop("_refresh_title_filter_draft", False):
+        st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
+    if st.session_state.pop("_refresh_company_filter_draft", False):
+        st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
 
 
 def ensure_persistence_defaults() -> None:
     paths = persistence_paths()
     paths["persistence_dir"].mkdir(parents=True, exist_ok=True)
-    if not paths["blocklist"].exists():
-        save_blocklist(list(DEFAULT_BLOCKLIST))
-    if not paths["blocklist_2"].exists():
-        save_company_blocklist(2, list(DEFAULT_BLOCKLIST))
+    migrate_legacy_company_blocklists_if_needed()
+    if not paths["title_filter"].exists():
+        save_title_filters([])
     if not paths["category_keywords"].exists():
         save_category_keywords([dict(x) for x in DEFAULT_CATEGORY_KEYWORDS])
 
 
-def add_company_to_blocklist_slot(slot: int, company: str) -> None:
-    """Append one company to blocklist 1 or 2 if not already matched; persist and sync sidebar text."""
+def add_company_filter(company: str) -> None:
     c = str(company).strip()
     if not c:
         return
-    bl = load_company_blocklist(slot)
-    if company_is_blocked(c, bl):
+    fl = load_company_filters()
+    if matches_text_filter(c, fl):
         return
-    bl.append(c)
-    save_company_blocklist(slot, bl)
-    sync_blocklist_drafts_from_disk()
+    fl.append(c)
+    save_company_filters(fl)
+    st.session_state["_refresh_company_filter_draft"] = True
 
 
-def remove_company_blocklist_entry(slot: int, entry: str) -> None:
-    """Remove one exact string from the given blocklist."""
-    bl = load_company_blocklist(slot)
-    new_list = [x for x in bl if x != entry]
-    save_company_blocklist(slot, new_list)
-    sync_blocklist_drafts_from_disk()
+def add_title_filter(title: str) -> None:
+    t = str(title).strip()
+    if not t:
+        return
+    fl = load_title_filters()
+    if matches_text_filter(t, fl):
+        return
+    fl.append(t)
+    save_title_filters(fl)
+    st.session_state["_refresh_title_filter_draft"] = True
 
 
-def render_excluded_insights(df_e: pd.DataFrame) -> None:
-    """Charts and table for one excluded cohort."""
+def remove_company_filter_entry(entry: str) -> None:
+    fl = [x for x in load_company_filters() if x != entry]
+    save_company_filters(fl)
+    st.session_state["_refresh_company_filter_draft"] = True
+
+
+def remove_title_filter_entry(entry: str) -> None:
+    fl = [x for x in load_title_filters() if x != entry]
+    save_title_filters(fl)
+    st.session_state["_refresh_title_filter_draft"] = True
+
+
+def render_hidden_insights(df_e: pd.DataFrame) -> None:
     if df_e.empty:
         st.caption("No listings in this cohort.")
         return
@@ -100,9 +127,13 @@ def render_excluded_insights(df_e: pd.DataFrame) -> None:
         st.plotly_chart(fig_co, use_container_width=True)
 
     st.dataframe(
-        df_e[["title", "company", "category", "published_at", "url"]].sort_values("company"),
+        df_e[["title", "company", "category", "salary", "published_at", "url"]].sort_values("company"),
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "url": st.column_config.LinkColumn("Link"),
+            "salary": st.column_config.TextColumn("Pay"),
+        },
     )
 
 
@@ -111,14 +142,20 @@ def annotate_jobs(jobs: list[dict], categories: list[dict]) -> list[dict]:
     for j in jobs:
         title = j.get("title") or ""
         company = j.get("company") or ""
+        salary = j.get("salary") or ""
         cat = categorize_title(title, categories)
-        row = {**j, "category": cat, "company": company, "title": title}
+        row = {
+            **j,
+            "category": cat,
+            "company": company,
+            "title": title,
+            "salary": salary if salary else "",
+        }
         out.append(row)
     return out
 
 
 def load_jobs_into_session() -> None:
-    """Populate ``st.session_state['jobs_raw']`` from API, falling back to disk cache."""
     try:
         raw = fetch_remotive_jobs()
         st.session_state["jobs_raw"] = raw
@@ -135,22 +172,33 @@ def load_jobs_into_session() -> None:
             st.session_state["jobs_error"] = str(e)
 
 
+def job_is_included(job: dict, title_filters: list[str], company_filters: list[str]) -> bool:
+    t = job.get("title") or ""
+    c = job.get("company") or ""
+    if matches_text_filter(t, title_filters):
+        return False
+    if matches_text_filter(c, company_filters):
+        return False
+    return True
+
+
 def main() -> None:
     st.set_page_config(page_title="TalentHawk", layout="wide")
     ensure_persistence_defaults()
+    apply_pending_filter_draft_refreshes()
 
     if "category_rules_draft" not in st.session_state:
         st.session_state["category_rules_draft"] = json.dumps(
             load_category_keywords(), indent=2, ensure_ascii=False
         )
 
-    if "blocklist_draft" not in st.session_state or "blocklist_2_draft" not in st.session_state:
-        sync_blocklist_drafts_from_disk()
+    if "company_filter_draft" not in st.session_state or "title_filter_draft" not in st.session_state:
+        sync_filter_drafts_from_disk()
 
     st.title("TalentHawk")
     st.caption(
-        "Indexes remote listings from the last 30 days (Remotive), groups titles into categories, "
-        "and keeps company and role rules on disk under `data/persistence/`."
+        "Last 30 days (Remotive). Use **＋** next to a title or company to hide matching rows from the main table and charts. "
+        "Remove a rule under **Filters** to show those jobs again."
     )
 
     if "jobs_raw" not in st.session_state:
@@ -192,46 +240,35 @@ def main() -> None:
         if err:
             st.caption(f"Last fetch error: {err}")
 
-        st.header("Company blocklists")
-        st.caption("Two independent lists. Jobs are **included** only when the company matches neither list. Matching is case-insensitive with substring rules.")
-        st.markdown("**Blocklist 1**")
-        st.text_area(
-            "Blocklist 1 one per line",
-            height=120,
-            label_visibility="collapsed",
-            key="blocklist_draft",
-        )
-        c_bl1a, c_bl1b = st.columns(2)
-        with c_bl1a:
-            if st.button("Save list 1"):
-                draft = st.session_state.get("blocklist_draft", "")
+        st.header("Filters (manual edit)")
+        st.caption("One pattern per line. Matching is case-insensitive; a line can match as a substring of the title/company (either direction).")
+
+        st.markdown("**Title filter**")
+        st.text_area("Title filter lines", height=100, label_visibility="collapsed", key="title_filter_draft")
+        c_t1, c_t2 = st.columns(2)
+        with c_t1:
+            if st.button("Save title filter"):
+                draft = st.session_state.get("title_filter_draft", "")
                 lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
-                save_company_blocklist(1, lines)
-                sync_blocklist_drafts_from_disk()
-                st.success(f"Saved {len(lines)} entr(y/ies).")
-        with c_bl1b:
-            if st.button("Reload list 1"):
-                st.session_state["blocklist_draft"] = "\n".join(load_company_blocklist(1))
+                save_title_filters(lines)
+                st.success(f"Saved {len(lines)} rule(s).")
+        with c_t2:
+            if st.button("Reload title filter"):
+                st.session_state["_refresh_title_filter_draft"] = True
                 st.rerun()
 
-        st.markdown("**Blocklist 2**")
-        st.text_area(
-            "Blocklist 2 one per line",
-            height=120,
-            label_visibility="collapsed",
-            key="blocklist_2_draft",
-        )
-        c_bl2a, c_bl2b = st.columns(2)
-        with c_bl2a:
-            if st.button("Save list 2"):
-                draft = st.session_state.get("blocklist_2_draft", "")
+        st.markdown("**Company filter**")
+        st.text_area("Company filter lines", height=100, label_visibility="collapsed", key="company_filter_draft")
+        c_c1, c_c2 = st.columns(2)
+        with c_c1:
+            if st.button("Save company filter"):
+                draft = st.session_state.get("company_filter_draft", "")
                 lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
-                save_company_blocklist(2, lines)
-                sync_blocklist_drafts_from_disk()
-                st.success(f"Saved {len(lines)} entr(y/ies).")
-        with c_bl2b:
-            if st.button("Reload list 2"):
-                st.session_state["blocklist_2_draft"] = "\n".join(load_company_blocklist(2))
+                save_company_filters(lines)
+                st.success(f"Saved {len(lines)} rule(s).")
+        with c_c2:
+            if st.button("Reload company filter"):
+                st.session_state["_refresh_company_filter_draft"] = True
                 st.rerun()
 
         st.header("Paths")
@@ -239,44 +276,45 @@ def main() -> None:
             st.caption(f"{label}: `{path}`")
 
     raw = st.session_state.get("jobs_raw") or []
-    blocklist_1 = load_company_blocklist(1)
-    blocklist_2 = load_company_blocklist(2)
+    title_filters = load_title_filters()
+    company_filters = load_company_filters()
     categories = load_category_keywords()
 
     windowed = filter_last_n_days(raw, days=30)
     annotated = annotate_jobs(windowed, categories)
 
-    def is_included(job: dict) -> bool:
-        co = job.get("company") or ""
-        return not company_is_blocked(co, blocklist_1) and not company_is_blocked(co, blocklist_2)
-
-    included = [j for j in annotated if is_included(j)]
-    excluded_1 = [j for j in annotated if company_is_blocked(j["company"], blocklist_1)]
-    excluded_2 = [j for j in annotated if company_is_blocked(j["company"], blocklist_2)]
+    included = [j for j in annotated if job_is_included(j, title_filters, company_filters)]
+    excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
+    excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Fetched (all time in feed)", len(raw))
-    c2.metric("Published in last 30 days", len(windowed))
-    c3.metric("Included", len(included))
-    c4.metric("Match list 1", len(excluded_1))
-    c5.metric("Match list 2", len(excluded_2))
+    c1.metric("Fetched (feed)", len(raw))
+    c2.metric("Last 30 days", len(windowed))
+    c3.metric("Shown (included)", len(included))
+    c4.metric("Hidden (title filter)", len(excluded_title))
+    c5.metric("Hidden (company filter)", len(excluded_company))
 
-    tab_inc, tab_exc, tab_rules = st.tabs(["Included jobs", "Filtered-out insights", "Category rules"])
+    tab_inc, tab_filt, tab_rules = st.tabs(["Included jobs", "Filters & hidden jobs", "Category rules"])
 
     with tab_inc:
-        q = st.text_input("Search included jobs (title or company)", "")
+        q = st.text_input("Search included jobs (title, company, pay)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
                 ql = q.lower()
-                m = df_i["title"].str.lower().str.contains(ql, na=False) | df_i["company"].str.lower().str.contains(ql, na=False)
+                pay_col = df_i["salary"].fillna("").astype(str)
+                m = (
+                    df_i["title"].str.lower().str.contains(ql, na=False)
+                    | df_i["company"].str.lower().str.contains(ql, na=False)
+                    | pay_col.str.lower().str.contains(ql, na=False)
+                )
                 df_show = df_i[m]
             else:
                 df_show = df_i
 
             st.caption(
-                "Each row: **title**, **company**, then **1** / **2** to add that company to blocklist 1 or 2. "
-                "Buttons are disabled if the company already matches that list."
+                "Columns: **Title** and **Company** each have **＋** to add that row’s text to the matching filter. "
+                "**Pay** and **Open** come from the feed when available."
             )
             n_show = len(df_show)
             if n_show == 0:
@@ -286,55 +324,69 @@ def main() -> None:
                 page_key = "included_jobs_page"
                 if page_key in st.session_state and int(st.session_state[page_key]) > total_pages:
                     st.session_state[page_key] = total_pages
-                page = st.number_input(
-                    "Page",
-                    min_value=1,
-                    max_value=total_pages,
-                    step=1,
-                    key=page_key,
-                )
+                page = st.number_input("Page", min_value=1, max_value=total_pages, step=1, key=page_key)
                 start = (int(page) - 1) * PAGE_SIZE
                 chunk = df_show.iloc[start : start + PAGE_SIZE]
                 st.caption(f"Showing {start + 1}–{min(start + PAGE_SIZE, n_show)} of {n_show}")
 
-                hdr_t, hdr_c, hdr_1, hdr_2 = st.columns([3.2, 2.2, 0.45, 0.45])
-                hdr_t.markdown("**Title**")
-                hdr_c.markdown("**Company**")
-                hdr_1.markdown("**1**")
-                hdr_2.markdown("**2**")
+                hdr = st.columns([2.35, 0.32, 1.45, 0.32, 0.95, 1.05, 0.52], vertical_alignment="center")
+                hdr[0].markdown("**Title**")
+                hdr[1].markdown("** **")
+                hdr[2].markdown("**Company**")
+                hdr[3].markdown("** **")
+                hdr[4].markdown("**Category**")
+                hdr[5].markdown("**Pay**")
+                hdr[6].markdown("**Link**")
 
                 for pos in range(len(chunk)):
                     row = chunk.iloc[pos]
                     title = str(row.get("title", "") or "")
                     company = str(row.get("company", "") or "").strip()
+                    category = str(row.get("category", "") or "")
+                    salary = str(row.get("salary", "") or "").strip()
+                    url = str(row.get("url", "") or "").strip()
                     row_key = f"{start}_{pos}"
-                    t_col, c_col, b1_col, b2_col = st.columns([3.2, 2.2, 0.45, 0.45], vertical_alignment="center")
-                    with t_col:
+
+                    cols = st.columns([2.35, 0.32, 1.45, 0.32, 0.95, 1.05, 0.52], vertical_alignment="center")
+                    with cols[0]:
                         st.text(_truncate(title, MAX_TITLE_LEN))
-                    with c_col:
-                        st.text(company or "—")
-                    with b1_col:
-                        d1 = not company or company_is_blocked(company, blocklist_1)
+                    with cols[1]:
+                        t_disabled = not title or matches_text_filter(title, title_filters)
                         if st.button(
-                            "1",
-                            key=f"bl1_{row_key}",
-                            help="Add company to blocklist 1",
-                            disabled=d1,
+                            "＋",
+                            key=f"tf_{row_key}",
+                            help="Add this title to the title filter",
+                            disabled=t_disabled,
                         ):
-                            add_company_to_blocklist_slot(1, company)
-                            st.toast(f"List 1: {company}")
+                            add_title_filter(title)
+                            st.toast("Added to title filter")
                             st.rerun()
-                    with b2_col:
-                        d2 = not company or company_is_blocked(company, blocklist_2)
+                    with cols[2]:
+                        st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
+                    with cols[3]:
+                        c_disabled = not company or matches_text_filter(company, company_filters)
                         if st.button(
-                            "2",
-                            key=f"bl2_{row_key}",
-                            help="Add company to blocklist 2",
-                            disabled=d2,
+                            "＋",
+                            key=f"cf_{row_key}",
+                            help="Add this company to the company filter",
+                            disabled=c_disabled,
                         ):
-                            add_company_to_blocklist_slot(2, company)
-                            st.toast(f"List 2: {company}")
+                            add_company_filter(company)
+                            st.toast("Added to company filter")
                             st.rerun()
+                    with cols[4]:
+                        st.text(category or "—")
+                    with cols[5]:
+                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                    with cols[6]:
+                        if url:
+                            safe = html.escape(url, quote=True)
+                            st.markdown(
+                                f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.caption("—")
         else:
             st.info("No jobs in the 30-day window (or feed is empty).")
 
@@ -350,48 +402,47 @@ def main() -> None:
             fig.update_layout(showlegend=False, xaxis_title=None)
             st.plotly_chart(fig, use_container_width=True)
 
-    with tab_exc:
-        st.subheader("Blocklists and filtered insights")
-        st.write(
-            "Manage both lists below (**✕** removes a rule). Insights use the same 30-day window as included jobs; "
-            "each section shows listings whose **company** matches that list."
-        )
+    with tab_filt:
+        st.subheader("Active filters")
+        st.write("Removing a rule immediately puts matching jobs back in **Included jobs** and updates charts.")
 
-        st.markdown("##### Blocklist 1 — active rules")
-        if not blocklist_1:
-            st.caption("Empty. Add from **Included jobs** (button **1**) or the sidebar.")
+        st.markdown("##### Title filter")
+        if not title_filters:
+            st.caption("Empty. Add with **＋** on a row or edit the sidebar.")
         else:
-            for i, entry in enumerate(blocklist_1):
+            for i, entry in enumerate(title_filters):
                 c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
                 with c_l:
                     st.text(entry)
                 with c_r:
-                    if st.button("✕", key=f"blocklist1_remove_{i}", help="Remove from blocklist 1"):
-                        remove_company_blocklist_entry(1, entry)
-                        st.toast(f"Removed from list 1: {entry}")
+                    if st.button("✕", key=f"title_f_remove_{i}", help="Remove from title filter"):
+                        remove_title_filter_entry(entry)
+                        st.toast("Removed title rule")
                         st.rerun()
 
-        st.markdown("##### Blocklist 2 — active rules")
-        if not blocklist_2:
-            st.caption("Empty. Add from **Included jobs** (button **2**) or the sidebar.")
+        st.markdown("##### Company filter")
+        if not company_filters:
+            st.caption("Empty. Add with **＋** on a row or edit the sidebar.")
         else:
-            for i, entry in enumerate(blocklist_2):
+            for i, entry in enumerate(company_filters):
                 c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
                 with c_l:
                     st.text(entry)
                 with c_r:
-                    if st.button("✕", key=f"blocklist2_remove_{i}", help="Remove from blocklist 2"):
-                        remove_company_blocklist_entry(2, entry)
-                        st.toast(f"Removed from list 2: {entry}")
+                    if st.button("✕", key=f"co_f_remove_{i}", help="Remove from company filter"):
+                        remove_company_filter_entry(entry)
+                        st.toast("Removed company rule")
                         st.rerun()
 
         st.divider()
-        st.markdown("### Matches blocklist 1")
-        render_excluded_insights(pd.DataFrame(excluded_1))
+        st.markdown("### Hidden by title filter")
+        st.caption("Rows whose **title** matches any title-filter rule (same 30-day window).")
+        render_hidden_insights(pd.DataFrame(excluded_title))
 
         st.divider()
-        st.markdown("### Matches blocklist 2")
-        render_excluded_insights(pd.DataFrame(excluded_2))
+        st.markdown("### Hidden by company filter")
+        st.caption("Rows whose **company** matches any company-filter rule (same 30-day window).")
+        render_hidden_insights(pd.DataFrame(excluded_company))
 
     with tab_rules:
         st.write(

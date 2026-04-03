@@ -1,4 +1,4 @@
-"""Local JSON persistence for blocklists, category rules, and optional job cache."""
+"""Local JSON persistence for filters, category rules, and optional job cache."""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from talenthawk.settings import (
-    BLOCKLIST_2_FILE,
-    BLOCKLIST_FILE,
     CATEGORY_KEYWORDS_FILE,
-    DEFAULT_BLOCKLIST,
+    COMPANY_FILTER_FILE,
     DEFAULT_CATEGORY_KEYWORDS,
+    DEFAULT_FILTER_LIST,
     JOBS_CACHE_FILE,
+    LEGACY_BLOCKLIST_2_FILE,
+    LEGACY_BLOCKLIST_FILE,
     PERSISTENCE_DIR,
+    TITLE_FILTER_FILE,
 )
-
-_BLOCKLIST_PATHS = {1: BLOCKLIST_FILE, 2: BLOCKLIST_2_FILE}
 
 
 def _ensure_dir(path: Path) -> None:
@@ -37,33 +37,41 @@ def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _normalize_blocklist(raw: object) -> list[str]:
+def _normalize_filter_list(raw: object) -> list[str]:
     if not isinstance(raw, list):
-        return list(DEFAULT_BLOCKLIST)
+        return list(DEFAULT_FILTER_LIST)
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
-def load_company_blocklist(slot: int) -> list[str]:
-    """Load blocklist 1 or 2 from disk (``slot`` is 1 or 2)."""
-    path = _BLOCKLIST_PATHS[slot]
-    raw = _read_json(path, DEFAULT_BLOCKLIST.copy())
-    return _normalize_blocklist(raw)
+def migrate_legacy_company_blocklists_if_needed() -> None:
+    """Create ``company_filter.json`` if missing, merging legacy ``companies_blocklist*.json`` when present."""
+    if COMPANY_FILTER_FILE.exists():
+        return
+    merged: list[str] = []
+    for path in (LEGACY_BLOCKLIST_FILE, LEGACY_BLOCKLIST_2_FILE):
+        merged.extend(_normalize_filter_list(_read_json(path, [])))
+    cleaned = sorted({c.strip() for c in merged if c and c.strip()}, key=str.lower)
+    _write_json(COMPANY_FILTER_FILE, cleaned)
 
 
-def save_company_blocklist(slot: int, companies: list[str]) -> None:
-    path = _BLOCKLIST_PATHS[slot]
-    cleaned = sorted({c.strip() for c in companies if c and c.strip()}, key=str.lower)
-    _write_json(path, cleaned)
+def load_title_filters() -> list[str]:
+    raw = _read_json(TITLE_FILTER_FILE, DEFAULT_FILTER_LIST.copy())
+    return _normalize_filter_list(raw)
 
 
-def load_blocklist() -> list[str]:
-    """Blocklist 1 (backward-compatible name for primary file)."""
-    return load_company_blocklist(1)
+def save_title_filters(entries: list[str]) -> None:
+    cleaned = sorted({e.strip() for e in entries if e and e.strip()}, key=str.lower)
+    _write_json(TITLE_FILTER_FILE, cleaned)
 
 
-def save_blocklist(companies: list[str]) -> None:
-    """Save blocklist 1 (backward-compatible)."""
-    save_company_blocklist(1, companies)
+def load_company_filters() -> list[str]:
+    raw = _read_json(COMPANY_FILTER_FILE, DEFAULT_FILTER_LIST.copy())
+    return _normalize_filter_list(raw)
+
+
+def save_company_filters(entries: list[str]) -> None:
+    cleaned = sorted({e.strip() for e in entries if e and e.strip()}, key=str.lower)
+    _write_json(COMPANY_FILTER_FILE, cleaned)
 
 
 def load_category_keywords() -> list[dict[str, Any]]:
@@ -101,8 +109,8 @@ def save_jobs_cache(jobs: list[dict[str, Any]], fetched_at_iso: str) -> None:
 def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
-        "blocklist": BLOCKLIST_FILE,
-        "blocklist_2": BLOCKLIST_2_FILE,
+        "title_filter": TITLE_FILTER_FILE,
+        "company_filter": COMPANY_FILTER_FILE,
         "category_keywords": CATEGORY_KEYWORDS_FILE,
         "jobs_cache": JOBS_CACHE_FILE,
     }
