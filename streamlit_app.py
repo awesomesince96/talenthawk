@@ -235,7 +235,7 @@ def main() -> None:
 
     st.title("TalentHawk")
     st.caption(
-        "Last 30 days (Remotive). Use **＋** next to **title**, **company**, or **category** to hide matching rows from the main table and charts. "
+        "Last 30 days (Remotive). Use **-** next to **title**, **company**, or **category** to exclude matching rows from the main table and charts. "
         "Remove a rule under **Filters & hidden jobs** to show them again."
     )
 
@@ -373,7 +373,7 @@ def main() -> None:
                 df_show = df_i
 
             st.caption(
-                "**Title**, **Company**, and **Category** each have **＋** to add that value to the matching filter. "
+                "**Title**, **Company**, and **Category** each have **-** to exclude that value (add to the matching filter). "
                 "**Pay** and **Open** come from the feed when available."
             )
             n_show = len(df_show)
@@ -415,39 +415,39 @@ def main() -> None:
                     with cols[1]:
                         t_disabled = not title or matches_text_filter(title, title_filters)
                         if st.button(
-                            "＋",
+                            "-",
                             key=f"tf_{row_key}",
-                            help="Add this title to the title filter",
+                            help="Exclude jobs matching this title",
                             disabled=t_disabled,
                         ):
                             add_title_filter(title)
-                            st.toast("Added to title filter")
+                            st.toast("Title excluded (filter updated)")
                             st.rerun()
                     with cols[2]:
                         st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
                     with cols[3]:
                         c_disabled = not company or matches_text_filter(company, company_filters)
                         if st.button(
-                            "＋",
+                            "-",
                             key=f"cf_{row_key}",
-                            help="Add this company to the company filter",
+                            help="Exclude jobs from this company",
                             disabled=c_disabled,
                         ):
                             add_company_filter(company)
-                            st.toast("Added to company filter")
+                            st.toast("Company excluded (filter updated)")
                             st.rerun()
                     with cols[4]:
                         st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
                     with cols[5]:
                         g_disabled = not category or matches_text_filter(category, category_filters)
                         if st.button(
-                            "＋",
+                            "-",
                             key=f"gf_{row_key}",
-                            help="Add this category label to the category filter",
+                            help="Exclude jobs in this category",
                             disabled=g_disabled,
                         ):
                             add_category_filter(category)
-                            st.toast("Added to category filter")
+                            st.toast("Category excluded (filter updated)")
                             st.rerun()
                     with cols[6]:
                         st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
@@ -481,7 +481,7 @@ def main() -> None:
 
         st.markdown("##### Title filter")
         if not title_filters:
-            st.caption("Empty. Add with **＋** on a row or edit the sidebar.")
+            st.caption("Empty. Use **-** on a row or edit the sidebar.")
         else:
             for i, entry in enumerate(title_filters):
                 c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
@@ -495,7 +495,7 @@ def main() -> None:
 
         st.markdown("##### Company filter")
         if not company_filters:
-            st.caption("Empty. Add with **＋** on a row or edit the sidebar.")
+            st.caption("Empty. Use **-** on a row or edit the sidebar.")
         else:
             for i, entry in enumerate(company_filters):
                 c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
@@ -509,7 +509,7 @@ def main() -> None:
 
         st.markdown("##### Category filter")
         if not category_filters:
-            st.caption("Empty. Add with **＋** next to a category on a row or edit the sidebar.")
+            st.caption("Empty. Use **-** next to a category on a row or edit the sidebar.")
         else:
             for i, entry in enumerate(category_filters):
                 c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
