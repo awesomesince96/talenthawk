@@ -39,9 +39,9 @@ Hiring pipelines are noisy: the same feed mixes roles you want with companies yo
 | **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`title`, `company`, `published_at`, `url`, `salary` when present, `source`). |
 | **Time window** | Keeps listings whose `published_at` falls in the **last 30 days** (UTC-aware parsing with fallbacks for odd date strings). |
 | **Categories** | Ordered keyword rules: **first matching category wins**; otherwise **Other**. Editable in the app or in JSON on disk. |
-| **Filters** | Separate **title** and **company** filter lists (case-insensitive substring rules, bidirectional match). Add rules from **＋** beside each row or edit lines in the sidebar; remove rules on **Filters & hidden jobs** or in JSON. |
+| **Filters** | Separate **title**, **company**, and **derived category** filter lists (case-insensitive substring rules, bidirectional match). Add rules from **＋** beside each row or edit lines in the sidebar; remove rules on **Filters & hidden jobs** or in JSON. |
 | **Resilience** | Optional on-disk `jobs_cache.json` when the API is unreachable; load or refresh from the sidebar. |
-| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on **included** rows; **Filters & hidden jobs** shows charts and tables for listings hidden by the title or company filter. |
+| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on **included** rows; **Filters & hidden jobs** shows charts and tables for listings hidden by title, company, or category filter. |
 
 ---
 
@@ -66,6 +66,7 @@ flowchart TB
     subgraph Rules["On-disk rules"]
         TF["title_filter.json"]
         CF["company_filter.json"]
+        GF["category_filter.json"]
         CK["category_keywords.json"]
     end
 
@@ -78,9 +79,11 @@ flowchart TB
     F --> W
     S --> TF
     S --> CF
+    S --> GF
     S --> CK
     TF --> UI
     CF --> UI
+    GF --> UI
     CK --> C
     W --> C
     C --> UI
@@ -132,6 +135,7 @@ Files under `data/persistence/` (created on first run if missing):
 |------|------|
 | `title_filter.json` | Patterns matched against job **titles**; matching rows are hidden from the included tab and search. |
 | `company_filter.json` | Patterns matched against **company** names; same behavior. On first run, if this file is missing, legacy `companies_blocklist.json` / `companies_blocklist_2.json` are merged into it once. |
+| `category_filter.json` | Patterns matched against the **classified** category label (output of `category_keywords` rules), e.g. hiding all **Other** or **QA**. |
 | `category_keywords.json` | Ordered rules: each category has **keywords**; the **first** category with a keyword hit in the job **title** wins; otherwise **Other**. |
 | `jobs_cache.json` | Optional snapshot of the last successful fetch (**gitignored**). Use **Save current listings to cache** / **Load from saved cache** in the sidebar. |
 

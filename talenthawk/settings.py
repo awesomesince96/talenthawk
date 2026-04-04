@@ -8,6 +8,8 @@ PERSISTENCE_DIR = DATA_DIR / "persistence"
 # Active filter storage (substring / bidirectional match, case-insensitive)
 TITLE_FILTER_FILE = PERSISTENCE_DIR / "title_filter.json"
 COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
+# Hide jobs whose derived category label (from keyword rules) matches any line
+CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
 
 # Legacy blocklist files (read once for migration into company_filter.json)
 LEGACY_BLOCKLIST_FILE = PERSISTENCE_DIR / "companies_blocklist.json"

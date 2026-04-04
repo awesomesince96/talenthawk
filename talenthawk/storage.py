@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from talenthawk.settings import (
+    CATEGORY_FILTER_FILE,
     CATEGORY_KEYWORDS_FILE,
     COMPANY_FILTER_FILE,
     DEFAULT_CATEGORY_KEYWORDS,
@@ -74,6 +75,16 @@ def save_company_filters(entries: list[str]) -> None:
     _write_json(COMPANY_FILTER_FILE, cleaned)
 
 
+def load_category_filters() -> list[str]:
+    raw = _read_json(CATEGORY_FILTER_FILE, DEFAULT_FILTER_LIST.copy())
+    return _normalize_filter_list(raw)
+
+
+def save_category_filters(entries: list[str]) -> None:
+    cleaned = sorted({e.strip() for e in entries if e and e.strip()}, key=str.lower)
+    _write_json(CATEGORY_FILTER_FILE, cleaned)
+
+
 def load_category_keywords() -> list[dict[str, Any]]:
     raw = _read_json(CATEGORY_KEYWORDS_FILE, None)
     if raw is None:
@@ -111,6 +122,7 @@ def persistence_paths() -> dict[str, Path]:
         "persistence_dir": PERSISTENCE_DIR,
         "title_filter": TITLE_FILTER_FILE,
         "company_filter": COMPANY_FILTER_FILE,
+        "category_filter": CATEGORY_FILTER_FILE,
         "category_keywords": CATEGORY_KEYWORDS_FILE,
         "jobs_cache": JOBS_CACHE_FILE,
     }

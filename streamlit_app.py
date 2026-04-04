@@ -1,5 +1,5 @@
 """
-TalentHawk — browse recent remote jobs, filter by title/company, and view category mix.
+TalentHawk — browse recent remote jobs, filter by title, company, and derived category.
 
 Run: uv run streamlit run streamlit_app.py
 """
@@ -22,12 +22,14 @@ from talenthawk.fetch_jobs import (
 )
 from talenthawk.settings import DEFAULT_CATEGORY_KEYWORDS
 from talenthawk.storage import (
+    load_category_filters,
     load_category_keywords,
     load_company_filters,
     load_jobs_cache,
     load_title_filters,
     migrate_legacy_company_blocklists_if_needed,
     persistence_paths,
+    save_category_filters,
     save_category_keywords,
     save_company_filters,
     save_jobs_cache,
@@ -38,6 +40,7 @@ PAGE_SIZE = 25
 MAX_TITLE_LEN = 72
 MAX_COMPANY_LEN = 36
 MAX_PAY_LEN = 28
+MAX_CATEGORY_LEN = 22
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -48,9 +51,10 @@ def _truncate(text: str, max_len: int) -> str:
 
 
 def sync_filter_drafts_from_disk() -> None:
-    """Load both filter text areas from disk. Only safe before those widgets are created this run."""
+    """Load filter text areas from disk. Only safe before those widgets are created this run."""
     st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
     st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
+    st.session_state["category_filter_draft"] = "\n".join(load_category_filters())
 
 
 def apply_pending_filter_draft_refreshes() -> None:
@@ -59,6 +63,8 @@ def apply_pending_filter_draft_refreshes() -> None:
         st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
     if st.session_state.pop("_refresh_company_filter_draft", False):
         st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
+    if st.session_state.pop("_refresh_category_filter_draft", False):
+        st.session_state["category_filter_draft"] = "\n".join(load_category_filters())
 
 
 def ensure_persistence_defaults() -> None:
@@ -67,6 +73,8 @@ def ensure_persistence_defaults() -> None:
     migrate_legacy_company_blocklists_if_needed()
     if not paths["title_filter"].exists():
         save_title_filters([])
+    if not paths["category_filter"].exists():
+        save_category_filters([])
     if not paths["category_keywords"].exists():
         save_category_keywords([dict(x) for x in DEFAULT_CATEGORY_KEYWORDS])
 
@@ -105,6 +113,24 @@ def remove_title_filter_entry(entry: str) -> None:
     fl = [x for x in load_title_filters() if x != entry]
     save_title_filters(fl)
     st.session_state["_refresh_title_filter_draft"] = True
+
+
+def add_category_filter(category: str) -> None:
+    cat = str(category).strip()
+    if not cat:
+        return
+    fl = load_category_filters()
+    if matches_text_filter(cat, fl):
+        return
+    fl.append(cat)
+    save_category_filters(fl)
+    st.session_state["_refresh_category_filter_draft"] = True
+
+
+def remove_category_filter_entry(entry: str) -> None:
+    fl = [x for x in load_category_filters() if x != entry]
+    save_category_filters(fl)
+    st.session_state["_refresh_category_filter_draft"] = True
 
 
 def render_hidden_insights(df_e: pd.DataFrame) -> None:
@@ -172,12 +198,20 @@ def load_jobs_into_session() -> None:
             st.session_state["jobs_error"] = str(e)
 
 
-def job_is_included(job: dict, title_filters: list[str], company_filters: list[str]) -> bool:
+def job_is_included(
+    job: dict,
+    title_filters: list[str],
+    company_filters: list[str],
+    category_filters: list[str],
+) -> bool:
     t = job.get("title") or ""
     c = job.get("company") or ""
+    g = job.get("category") or ""
     if matches_text_filter(t, title_filters):
         return False
     if matches_text_filter(c, company_filters):
+        return False
+    if matches_text_filter(g, category_filters):
         return False
     return True
 
@@ -192,13 +226,17 @@ def main() -> None:
             load_category_keywords(), indent=2, ensure_ascii=False
         )
 
-    if "company_filter_draft" not in st.session_state or "title_filter_draft" not in st.session_state:
+    if (
+        "company_filter_draft" not in st.session_state
+        or "title_filter_draft" not in st.session_state
+        or "category_filter_draft" not in st.session_state
+    ):
         sync_filter_drafts_from_disk()
 
     st.title("TalentHawk")
     st.caption(
-        "Last 30 days (Remotive). Use **＋** next to a title or company to hide matching rows from the main table and charts. "
-        "Remove a rule under **Filters** to show those jobs again."
+        "Last 30 days (Remotive). Use **＋** next to **title**, **company**, or **category** to hide matching rows from the main table and charts. "
+        "Remove a rule under **Filters & hidden jobs** to show them again."
     )
 
     if "jobs_raw" not in st.session_state:
@@ -241,7 +279,10 @@ def main() -> None:
             st.caption(f"Last fetch error: {err}")
 
         st.header("Filters (manual edit)")
-        st.caption("One pattern per line. Matching is case-insensitive; a line can match as a substring of the title/company (either direction).")
+        st.caption(
+            "One pattern per line. Matching is case-insensitive; a line can match as a substring either way "
+            "(title, company, or **derived category** label from your keyword rules)."
+        )
 
         st.markdown("**Title filter**")
         st.text_area("Title filter lines", height=100, label_visibility="collapsed", key="title_filter_draft")
@@ -271,6 +312,21 @@ def main() -> None:
                 st.session_state["_refresh_company_filter_draft"] = True
                 st.rerun()
 
+        st.markdown("**Category filter**")
+        st.caption("Matches the **classified** category (e.g. Engineering, Other), not raw title text.")
+        st.text_area("Category filter lines", height=90, label_visibility="collapsed", key="category_filter_draft")
+        c_g1, c_g2 = st.columns(2)
+        with c_g1:
+            if st.button("Save category filter"):
+                draft = st.session_state.get("category_filter_draft", "")
+                lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
+                save_category_filters(lines)
+                st.success(f"Saved {len(lines)} rule(s).")
+        with c_g2:
+            if st.button("Reload category filter"):
+                st.session_state["_refresh_category_filter_draft"] = True
+                st.rerun()
+
         st.header("Paths")
         for label, path in persistence_paths().items():
             st.caption(f"{label}: `{path}`")
@@ -278,26 +334,29 @@ def main() -> None:
     raw = st.session_state.get("jobs_raw") or []
     title_filters = load_title_filters()
     company_filters = load_company_filters()
+    category_filters = load_category_filters()
     categories = load_category_keywords()
 
     windowed = filter_last_n_days(raw, days=30)
     annotated = annotate_jobs(windowed, categories)
 
-    included = [j for j in annotated if job_is_included(j, title_filters, company_filters)]
+    included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
     excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
     excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
+    excluded_category = [j for j in annotated if matches_text_filter(j["category"], category_filters)]
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Fetched (feed)", len(raw))
     c2.metric("Last 30 days", len(windowed))
     c3.metric("Shown (included)", len(included))
-    c4.metric("Hidden (title filter)", len(excluded_title))
-    c5.metric("Hidden (company filter)", len(excluded_company))
+    c4.metric("Hidden (title)", len(excluded_title))
+    c5.metric("Hidden (company)", len(excluded_company))
+    c6.metric("Hidden (category)", len(excluded_category))
 
     tab_inc, tab_filt, tab_rules = st.tabs(["Included jobs", "Filters & hidden jobs", "Category rules"])
 
     with tab_inc:
-        q = st.text_input("Search included jobs (title, company, pay)", "")
+        q = st.text_input("Search included jobs (title, company, category, pay)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
@@ -306,6 +365,7 @@ def main() -> None:
                 m = (
                     df_i["title"].str.lower().str.contains(ql, na=False)
                     | df_i["company"].str.lower().str.contains(ql, na=False)
+                    | df_i["category"].str.lower().str.contains(ql, na=False)
                     | pay_col.str.lower().str.contains(ql, na=False)
                 )
                 df_show = df_i[m]
@@ -313,7 +373,7 @@ def main() -> None:
                 df_show = df_i
 
             st.caption(
-                "Columns: **Title** and **Company** each have **＋** to add that row’s text to the matching filter. "
+                "**Title**, **Company**, and **Category** each have **＋** to add that value to the matching filter. "
                 "**Pay** and **Open** come from the feed when available."
             )
             n_show = len(df_show)
@@ -329,14 +389,16 @@ def main() -> None:
                 chunk = df_show.iloc[start : start + PAGE_SIZE]
                 st.caption(f"Showing {start + 1}–{min(start + PAGE_SIZE, n_show)} of {n_show}")
 
-                hdr = st.columns([2.35, 0.32, 1.45, 0.32, 0.95, 1.05, 0.52], vertical_alignment="center")
+                _colw = [1.95, 0.28, 1.22, 0.28, 0.58, 0.28, 0.92, 0.46]
+                hdr = st.columns(_colw, vertical_alignment="center")
                 hdr[0].markdown("**Title**")
                 hdr[1].markdown("** **")
                 hdr[2].markdown("**Company**")
                 hdr[3].markdown("** **")
-                hdr[4].markdown("**Category**")
-                hdr[5].markdown("**Pay**")
-                hdr[6].markdown("**Link**")
+                hdr[4].markdown("**Cat**")
+                hdr[5].markdown("** **")
+                hdr[6].markdown("**Pay**")
+                hdr[7].markdown("**Link**")
 
                 for pos in range(len(chunk)):
                     row = chunk.iloc[pos]
@@ -347,7 +409,7 @@ def main() -> None:
                     url = str(row.get("url", "") or "").strip()
                     row_key = f"{start}_{pos}"
 
-                    cols = st.columns([2.35, 0.32, 1.45, 0.32, 0.95, 1.05, 0.52], vertical_alignment="center")
+                    cols = st.columns(_colw, vertical_alignment="center")
                     with cols[0]:
                         st.text(_truncate(title, MAX_TITLE_LEN))
                     with cols[1]:
@@ -375,10 +437,21 @@ def main() -> None:
                             st.toast("Added to company filter")
                             st.rerun()
                     with cols[4]:
-                        st.text(category or "—")
+                        st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
                     with cols[5]:
-                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                        g_disabled = not category or matches_text_filter(category, category_filters)
+                        if st.button(
+                            "＋",
+                            key=f"gf_{row_key}",
+                            help="Add this category label to the category filter",
+                            disabled=g_disabled,
+                        ):
+                            add_category_filter(category)
+                            st.toast("Added to category filter")
+                            st.rerun()
                     with cols[6]:
+                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                    with cols[7]:
                         if url:
                             safe = html.escape(url, quote=True)
                             st.markdown(
@@ -434,6 +507,20 @@ def main() -> None:
                         st.toast("Removed company rule")
                         st.rerun()
 
+        st.markdown("##### Category filter")
+        if not category_filters:
+            st.caption("Empty. Add with **＋** next to a category on a row or edit the sidebar.")
+        else:
+            for i, entry in enumerate(category_filters):
+                c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
+                with c_l:
+                    st.text(entry)
+                with c_r:
+                    if st.button("✕", key=f"cat_f_remove_{i}", help="Remove from category filter"):
+                        remove_category_filter_entry(entry)
+                        st.toast("Removed category rule")
+                        st.rerun()
+
         st.divider()
         st.markdown("### Hidden by title filter")
         st.caption("Rows whose **title** matches any title-filter rule (same 30-day window).")
@@ -443,6 +530,11 @@ def main() -> None:
         st.markdown("### Hidden by company filter")
         st.caption("Rows whose **company** matches any company-filter rule (same 30-day window).")
         render_hidden_insights(pd.DataFrame(excluded_company))
+
+        st.divider()
+        st.markdown("### Hidden by category filter")
+        st.caption("Rows whose **derived category** label matches any category-filter rule (same 30-day window).")
+        render_hidden_insights(pd.DataFrame(excluded_category))
 
     with tab_rules:
         st.write(
