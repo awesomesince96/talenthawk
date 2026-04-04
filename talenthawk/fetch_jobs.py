@@ -50,8 +50,11 @@ def fetch_remotive_jobs(timeout: float = 30.0) -> list[dict[str, Any]]:
         pub = j.get("publication_date") or j.get("created_at")
         url = j.get("url") or j.get("apply_url") or ""
         salary = (j.get("salary") or "").strip()
+        jid = j.get("id")
+        job_id = str(jid).strip() if jid is not None and str(jid).strip() else ""
         out.append(
             {
+                "job_id": job_id,
                 "title": title,
                 "company": company,
                 "published_at": str(pub) if pub else "",

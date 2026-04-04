@@ -36,7 +36,7 @@ Hiring pipelines are noisy: the same feed mixes roles you want with companies yo
 
 | Area | What you get |
 |------|----------------|
-| **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`title`, `company`, `published_at`, `url`, `salary` when present, `source`). |
+| **Ingest** | Pulls from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs), normalizes to a single schema (`job_id`, `title`, `company`, `published_at`, `url`, `salary` when present, `source`). |
 | **Time window** | Keeps listings whose `published_at` falls in the **last 30 days** (UTC-aware parsing with fallbacks for odd date strings). |
 | **Categories** | Ordered keyword rules: **first matching category wins**; otherwise **Other**. Editable in the app or in JSON on disk. |
 | **Filters** | Separate **title**, **company**, and **derived category** filter lists (case-insensitive substring rules, bidirectional match). Add rules from **-** beside each row (exclude from results) or edit lines in the sidebar; remove rules on **Filters & hidden jobs** or in JSON. |

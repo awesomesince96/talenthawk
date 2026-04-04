@@ -152,11 +152,15 @@ def render_hidden_insights(df_e: pd.DataFrame) -> None:
         fig_co.update_layout(xaxis_tickangle=-45, showlegend=False)
         st.plotly_chart(fig_co, use_container_width=True)
 
+    table = df_e.sort_values("company")
+    if "job_id" not in table.columns:
+        table = table.assign(job_id="")
     st.dataframe(
-        df_e[["title", "company", "category", "salary", "published_at", "url"]].sort_values("company"),
+        table[["job_id", "title", "company", "category", "salary", "published_at", "url"]],
         use_container_width=True,
         hide_index=True,
         column_config={
+            "job_id": st.column_config.TextColumn("ID"),
             "url": st.column_config.LinkColumn("Link"),
             "salary": st.column_config.TextColumn("Pay"),
         },
@@ -169,9 +173,16 @@ def annotate_jobs(jobs: list[dict], categories: list[dict]) -> list[dict]:
         title = j.get("title") or ""
         company = j.get("company") or ""
         salary = j.get("salary") or ""
+        raw = j.get("raw") if isinstance(j.get("raw"), dict) else {}
+        jid = j.get("job_id")
+        if not jid and raw:
+            rid = raw.get("id")
+            jid = str(rid).strip() if rid is not None and str(rid).strip() else ""
+        job_id = str(jid).strip() if jid else ""
         cat = categorize_title(title, categories)
         row = {
             **j,
+            "job_id": job_id,
             "category": cat,
             "company": company,
             "title": title,
@@ -356,14 +367,16 @@ def main() -> None:
     tab_inc, tab_filt, tab_rules = st.tabs(["Included jobs", "Filters & hidden jobs", "Category rules"])
 
     with tab_inc:
-        q = st.text_input("Search included jobs (title, company, category, pay)", "")
+        q = st.text_input("Search included jobs (id, title, company, category, pay)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
                 ql = q.lower()
                 pay_col = df_i["salary"].fillna("").astype(str)
+                id_col = df_i["job_id"].fillna("").astype(str)
                 m = (
-                    df_i["title"].str.lower().str.contains(ql, na=False)
+                    id_col.str.lower().str.contains(ql, na=False)
+                    | df_i["title"].str.lower().str.contains(ql, na=False)
                     | df_i["company"].str.lower().str.contains(ql, na=False)
                     | df_i["category"].str.lower().str.contains(ql, na=False)
                     | pay_col.str.lower().str.contains(ql, na=False)
@@ -389,19 +402,21 @@ def main() -> None:
                 chunk = df_show.iloc[start : start + PAGE_SIZE]
                 st.caption(f"Showing {start + 1}–{min(start + PAGE_SIZE, n_show)} of {n_show}")
 
-                _colw = [1.95, 0.28, 1.22, 0.28, 0.58, 0.28, 0.92, 0.46]
+                _colw = [0.52, 1.78, 0.26, 1.12, 0.26, 0.52, 0.26, 0.85, 0.44]
                 hdr = st.columns(_colw, vertical_alignment="center")
-                hdr[0].markdown("**Title**")
-                hdr[1].markdown("** **")
-                hdr[2].markdown("**Company**")
-                hdr[3].markdown("** **")
-                hdr[4].markdown("**Cat**")
-                hdr[5].markdown("** **")
-                hdr[6].markdown("**Pay**")
-                hdr[7].markdown("**Link**")
+                hdr[0].markdown("**ID**")
+                hdr[1].markdown("**Title**")
+                hdr[2].markdown("** **")
+                hdr[3].markdown("**Company**")
+                hdr[4].markdown("** **")
+                hdr[5].markdown("**Cat**")
+                hdr[6].markdown("** **")
+                hdr[7].markdown("**Pay**")
+                hdr[8].markdown("**Link**")
 
                 for pos in range(len(chunk)):
                     row = chunk.iloc[pos]
+                    job_id = str(row.get("job_id", "") or "").strip()
                     title = str(row.get("title", "") or "")
                     company = str(row.get("company", "") or "").strip()
                     category = str(row.get("category", "") or "")
@@ -411,8 +426,10 @@ def main() -> None:
 
                     cols = st.columns(_colw, vertical_alignment="center")
                     with cols[0]:
-                        st.text(_truncate(title, MAX_TITLE_LEN))
+                        st.text(job_id if job_id else "—")
                     with cols[1]:
+                        st.text(_truncate(title, MAX_TITLE_LEN))
+                    with cols[2]:
                         t_disabled = not title or matches_text_filter(title, title_filters)
                         if st.button(
                             "-",
@@ -423,9 +440,9 @@ def main() -> None:
                             add_title_filter(title)
                             st.toast("Title excluded (filter updated)")
                             st.rerun()
-                    with cols[2]:
-                        st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
                     with cols[3]:
+                        st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
+                    with cols[4]:
                         c_disabled = not company or matches_text_filter(company, company_filters)
                         if st.button(
                             "-",
@@ -436,9 +453,9 @@ def main() -> None:
                             add_company_filter(company)
                             st.toast("Company excluded (filter updated)")
                             st.rerun()
-                    with cols[4]:
-                        st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
                     with cols[5]:
+                        st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
+                    with cols[6]:
                         g_disabled = not category or matches_text_filter(category, category_filters)
                         if st.button(
                             "-",
@@ -449,9 +466,9 @@ def main() -> None:
                             add_category_filter(category)
                             st.toast("Category excluded (filter updated)")
                             st.rerun()
-                    with cols[6]:
-                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
                     with cols[7]:
+                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                    with cols[8]:
                         if url:
                             safe = html.escape(url, quote=True)
                             st.markdown(
