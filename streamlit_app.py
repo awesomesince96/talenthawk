@@ -41,6 +41,8 @@ MAX_TITLE_LEN = 72
 MAX_COMPANY_LEN = 36
 MAX_PAY_LEN = 28
 MAX_CATEGORY_LEN = 22
+TITLE_DIST_TOP_N = 25
+TITLE_DIST_CHART_MAX = 56
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -48,6 +50,69 @@ def _truncate(text: str, max_len: int) -> str:
     if len(t) <= max_len:
         return t
     return t[: max_len - 1] + "…"
+
+
+def _render_top_n_pie(
+    df: pd.DataFrame,
+    column: str,
+    *,
+    subheader: str,
+    dimension_description: str,
+    other_noun: str,
+    empty_caption: str = "No rows to chart.",
+    label_max: int = TITLE_DIST_CHART_MAX,
+    top_n: int = TITLE_DIST_TOP_N,
+) -> None:
+    """Pie of value counts for ``column``; top ``top_n`` slices plus **Other** when needed."""
+    st.subheader(subheader)
+    if df.empty or column not in df.columns:
+        st.caption(empty_caption)
+        return
+    ser = df[column].fillna("(empty)").astype(str)
+    vc = ser.value_counts().rename_axis("value").reset_index(name="count")
+    n_distinct = len(vc)
+    if n_distinct == 0:
+        st.caption(empty_caption)
+        return
+    pie_rows: list[dict] = []
+    for _, r in vc.head(top_n).iterrows():
+        v = str(r["value"])
+        pie_rows.append({"label": _truncate(v, label_max), "count": int(r["count"]), "hover": v})
+    if n_distinct > top_n:
+        rest = vc.iloc[top_n:]
+        other_count = int(rest["count"].sum())
+        n_other = n_distinct - top_n
+        pie_rows.append(
+            {
+                "label": f"Other ({n_other} {other_noun})",
+                "count": other_count,
+                "hover": f"{n_other} distinct {other_noun} not in top {top_n} ({other_count} job rows)",
+            }
+        )
+    pie_df = pd.DataFrame(pie_rows)
+    fig = px.pie(
+        pie_df,
+        names="label",
+        values="count",
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
+    fig.update_traces(
+        textinfo="label+percent",
+        textposition="auto",
+        insidetextorientation="radial",
+        hovertemplate="<b>%{customdata}</b><br>Jobs: %{value}<br>%{percent}<extra></extra>",
+        customdata=pie_df["hover"],
+    )
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="middle", y=0.5, font=dict(size=11)),
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.caption(
+        f"Pie by {dimension_description}: top {min(top_n, n_distinct)} of {n_distinct} distinct {other_noun}; "
+        "remaining grouped as **Other** when needed. Hover for the full label."
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def sync_filter_drafts_from_disk() -> None:
@@ -480,17 +545,30 @@ def main() -> None:
         else:
             st.info("No jobs in the 30-day window (or feed is empty).")
 
-        st.subheader("Category distribution (included)")
-        if not df_i.empty:
-            fig = px.bar(
-                df_i.groupby("category").size().reset_index(name="count"),
-                x="category",
-                y="count",
-                color="category",
-                labels={"count": "Jobs"},
-            )
-            fig.update_layout(showlegend=False, xaxis_title=None)
-            st.plotly_chart(fig, use_container_width=True)
+        _render_top_n_pie(
+            df_i,
+            "category",
+            subheader="Category distribution (included)",
+            dimension_description="derived category (from your keyword rules)",
+            other_noun="categories",
+            empty_caption="No categories to chart.",
+        )
+        _render_top_n_pie(
+            df_i,
+            "company",
+            subheader="Company distribution (included)",
+            dimension_description="company name",
+            other_noun="companies",
+            empty_caption="No companies to chart.",
+        )
+        _render_top_n_pie(
+            df_i,
+            "title",
+            subheader="Job title distribution (included)",
+            dimension_description="exact job title",
+            other_noun="titles",
+            empty_caption="No titles to chart.",
+        )
 
     with tab_filt:
         st.subheader("Active filters")

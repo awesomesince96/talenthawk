@@ -41,7 +41,7 @@ Hiring pipelines are noisy: the same feed mixes roles you want with companies yo
 | **Categories** | Ordered keyword rules: **first matching category wins**; otherwise **Other**. Editable in the app or in JSON on disk. |
 | **Filters** | Separate **title**, **company**, and **derived category** filter lists (case-insensitive substring rules, bidirectional match). Add rules from **-** beside each row (exclude from results) or edit lines in the sidebar; remove rules on **Filters & hidden jobs** or in JSON. |
 | **Resilience** | Optional on-disk `jobs_cache.json` when the API is unreachable; load or refresh from the sidebar. |
-| **Analytics** | [Plotly](https://plotly.com/python/) bar charts for category mix on **included** rows; **Filters & hidden jobs** shows charts and tables for listings hidden by title, company, or category filter. |
+| **Analytics** | [Plotly](https://plotly.com/python/) pie charts on **included** rows for **category**, **company**, and **job title** (top slices + **Other**); **Filters & hidden jobs** uses bar charts and tables for hidden listings. |
 
 ---
 
