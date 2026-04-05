@@ -107,23 +107,6 @@ def _render_top_n_pie(
     st.plotly_chart(fig, use_container_width=True)
 
 
-def sync_filter_drafts_from_disk() -> None:
-    """Load filter text areas from disk. Only safe before those widgets are created this run."""
-    st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
-    st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
-    st.session_state["category_filter_draft"] = "\n".join(load_category_filters())
-
-
-def apply_pending_filter_draft_refreshes() -> None:
-    """Apply sidebar draft updates scheduled after a prior interaction (must run before filter text_areas)."""
-    if st.session_state.pop("_refresh_title_filter_draft", False):
-        st.session_state["title_filter_draft"] = "\n".join(load_title_filters())
-    if st.session_state.pop("_refresh_company_filter_draft", False):
-        st.session_state["company_filter_draft"] = "\n".join(load_company_filters())
-    if st.session_state.pop("_refresh_category_filter_draft", False):
-        st.session_state["category_filter_draft"] = "\n".join(load_category_filters())
-
-
 def ensure_persistence_defaults() -> None:
     paths = persistence_paths()
     paths["persistence_dir"].mkdir(parents=True, exist_ok=True)
@@ -144,7 +127,6 @@ def add_company_filter(company: str) -> None:
         return
     fl.append(c)
     save_company_filters(fl)
-    st.session_state["_refresh_company_filter_draft"] = True
 
 
 def add_title_filter(title: str) -> None:
@@ -156,19 +138,16 @@ def add_title_filter(title: str) -> None:
         return
     fl.append(t)
     save_title_filters(fl)
-    st.session_state["_refresh_title_filter_draft"] = True
 
 
 def remove_company_filter_entry(entry: str) -> None:
     fl = [x for x in load_company_filters() if x != entry]
     save_company_filters(fl)
-    st.session_state["_refresh_company_filter_draft"] = True
 
 
 def remove_title_filter_entry(entry: str) -> None:
     fl = [x for x in load_title_filters() if x != entry]
     save_title_filters(fl)
-    st.session_state["_refresh_title_filter_draft"] = True
 
 
 def add_category_filter(category: str) -> None:
@@ -180,13 +159,69 @@ def add_category_filter(category: str) -> None:
         return
     fl.append(cat)
     save_category_filters(fl)
-    st.session_state["_refresh_category_filter_draft"] = True
 
 
 def remove_category_filter_entry(entry: str) -> None:
     fl = [x for x in load_category_filters() if x != entry]
     save_category_filters(fl)
-    st.session_state["_refresh_category_filter_draft"] = True
+
+
+def render_sidebar_filters(
+    title_filters: list[str],
+    company_filters: list[str],
+    category_filters: list[str],
+) -> None:
+    st.header("Filters")
+    st.caption(
+        "Substring match, case-insensitive. Press **-** on a row in **Included jobs** to add a rule; **✕** here removes it."
+    )
+
+    st.markdown("**Title**")
+    if not title_filters:
+        st.caption("—")
+    else:
+        for i, entry in enumerate(title_filters):
+            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+            with c_l:
+                st.text(_truncate(entry, 42))
+            with c_r:
+                if st.button("✕", key=f"sb_title_rm_{i}", help="Remove from title filter"):
+                    remove_title_filter_entry(entry)
+                    st.toast("Removed title rule")
+                    st.rerun()
+
+    st.markdown("**Company**")
+    if not company_filters:
+        st.caption("—")
+    else:
+        for i, entry in enumerate(company_filters):
+            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+            with c_l:
+                st.text(_truncate(entry, 42))
+            with c_r:
+                if st.button("✕", key=f"sb_co_rm_{i}", help="Remove from company filter"):
+                    remove_company_filter_entry(entry)
+                    st.toast("Removed company rule")
+                    st.rerun()
+
+    st.markdown("**Category**")
+    if not category_filters:
+        st.caption("Inferred from title — none yet.")
+    else:
+        st.caption("Inferred label, not raw title.")
+        for i, entry in enumerate(category_filters):
+            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+            with c_l:
+                st.text(_truncate(entry, 36))
+            with c_r:
+                if st.button("✕", key=f"sb_cat_rm_{i}", help="Remove from category filter"):
+                    remove_category_filter_entry(entry)
+                    st.toast("Removed category rule")
+                    st.rerun()
+
+    with st.expander("Persistence paths"):
+        for label, path in persistence_paths().items():
+            st.caption(f"{label}: `{path}`")
 
 
 def render_hidden_insights(df_e: pd.DataFrame) -> None:
@@ -281,95 +316,10 @@ def job_is_included(
 def main() -> None:
     st.set_page_config(page_title="TalentHawk", layout="wide")
     ensure_persistence_defaults()
-    apply_pending_filter_draft_refreshes()
-
-    if (
-        "company_filter_draft" not in st.session_state
-        or "title_filter_draft" not in st.session_state
-        or "category_filter_draft" not in st.session_state
-    ):
-        sync_filter_drafts_from_disk()
-
-    st.title("TalentHawk")
-    st.caption(
-        "Last 30 days (Remotive). Use **-** next to **title**, **company**, or **category** to exclude matching rows from the main table and charts. "
-        "Remove a rule under **Filters & hidden jobs** to show them again."
-    )
 
     if "jobs_raw" not in st.session_state:
         with st.spinner("Fetching jobs…"):
             load_jobs_into_session()
-
-    with st.sidebar:
-        st.header("Jobs")
-        if st.button("Refresh from Remotive API", type="primary"):
-            with st.spinner("Fetching…"):
-                try:
-                    raw = fetch_remotive_jobs()
-                    st.session_state["jobs_raw"] = raw
-                    st.session_state["jobs_source"] = "remotive_api"
-                    st.session_state.pop("jobs_error", None)
-                    st.success(f"Loaded {len(raw)} listings.")
-                except Exception as e:
-                    st.error(str(e))
-        src = st.session_state.get("jobs_source", "?")
-        st.caption(f"Source: **{src}**")
-        err = st.session_state.get("jobs_error")
-        if err:
-            st.caption(f"Last fetch error: {err}")
-
-        st.header("Filters (manual edit)")
-        st.caption(
-            "One pattern per line. Matching is case-insensitive; a line can match as a substring either way "
-            "(title, company, or **category** label inferred from the job title)."
-        )
-
-        st.markdown("**Title filter**")
-        st.text_area("Title filter lines", height=100, label_visibility="collapsed", key="title_filter_draft")
-        c_t1, c_t2 = st.columns(2)
-        with c_t1:
-            if st.button("Save title filter"):
-                draft = st.session_state.get("title_filter_draft", "")
-                lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
-                save_title_filters(lines)
-                st.success(f"Saved {len(lines)} rule(s).")
-        with c_t2:
-            if st.button("Reload title filter"):
-                st.session_state["_refresh_title_filter_draft"] = True
-                st.rerun()
-
-        st.markdown("**Company filter**")
-        st.text_area("Company filter lines", height=100, label_visibility="collapsed", key="company_filter_draft")
-        c_c1, c_c2 = st.columns(2)
-        with c_c1:
-            if st.button("Save company filter"):
-                draft = st.session_state.get("company_filter_draft", "")
-                lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
-                save_company_filters(lines)
-                st.success(f"Saved {len(lines)} rule(s).")
-        with c_c2:
-            if st.button("Reload company filter"):
-                st.session_state["_refresh_company_filter_draft"] = True
-                st.rerun()
-
-        st.markdown("**Category filter**")
-        st.caption("Matches the **category** inferred from the title (e.g. Engineering, Other), not raw title text.")
-        st.text_area("Category filter lines", height=90, label_visibility="collapsed", key="category_filter_draft")
-        c_g1, c_g2 = st.columns(2)
-        with c_g1:
-            if st.button("Save category filter"):
-                draft = st.session_state.get("category_filter_draft", "")
-                lines = [ln.strip() for ln in draft.splitlines() if ln.strip()]
-                save_category_filters(lines)
-                st.success(f"Saved {len(lines)} rule(s).")
-        with c_g2:
-            if st.button("Reload category filter"):
-                st.session_state["_refresh_category_filter_draft"] = True
-                st.rerun()
-
-        st.header("Paths")
-        for label, path in persistence_paths().items():
-            st.caption(f"{label}: `{path}`")
 
     raw = st.session_state.get("jobs_raw") or []
     title_filters = load_title_filters()
@@ -384,6 +334,31 @@ def main() -> None:
     excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
     excluded_category = [j for j in annotated if matches_text_filter(j["category"], category_filters)]
 
+    with st.sidebar:
+        st.header("Jobs")
+        if st.button("Refresh from Remotive API", type="primary"):
+            with st.spinner("Fetching…"):
+                try:
+                    fresh = fetch_remotive_jobs()
+                    st.session_state["jobs_raw"] = fresh
+                    st.session_state["jobs_source"] = "remotive_api"
+                    st.session_state.pop("jobs_error", None)
+                    st.success(f"Loaded {len(fresh)} listings.")
+                except Exception as e:
+                    st.error(str(e))
+        src = st.session_state.get("jobs_source", "?")
+        st.caption(f"Source: **{src}**")
+        err = st.session_state.get("jobs_error")
+        if err:
+            st.caption(f"Last fetch error: {err}")
+
+        render_sidebar_filters(title_filters, company_filters, category_filters)
+
+    st.title("TalentHawk")
+    st.caption(
+        "Last 30 days (Remotive). Use **-** on a row to add that value to a filter; use **✕** in the sidebar to remove a rule."
+    )
+
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Fetched (feed)", len(raw))
     c2.metric("Last 30 days", len(windowed))
@@ -392,7 +367,7 @@ def main() -> None:
     c5.metric("Hidden (company)", len(excluded_company))
     c6.metric("Hidden (category)", len(excluded_category))
 
-    tab_inc, tab_filt = st.tabs(["Included jobs", "Filters & hidden jobs"])
+    tab_inc, tab_hidden = st.tabs(["Included jobs", "Hidden jobs"])
 
     with tab_inc:
         q = st.text_input("Search included jobs (id, title, company, category, pay)", "")
@@ -533,53 +508,12 @@ def main() -> None:
             empty_caption="No titles to chart.",
         )
 
-    with tab_filt:
-        st.subheader("Active filters")
-        st.write("Removing a rule immediately puts matching jobs back in **Included jobs** and updates charts.")
+    with tab_hidden:
+        st.subheader("Hidden jobs")
+        st.caption(
+            "Same 30-day window as **Included jobs**. Remove filter rules with **✕** in the left **Filters** panel."
+        )
 
-        st.markdown("##### Title filter")
-        if not title_filters:
-            st.caption("Empty. Use **-** on a row or edit the sidebar.")
-        else:
-            for i, entry in enumerate(title_filters):
-                c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
-                with c_l:
-                    st.text(entry)
-                with c_r:
-                    if st.button("✕", key=f"title_f_remove_{i}", help="Remove from title filter"):
-                        remove_title_filter_entry(entry)
-                        st.toast("Removed title rule")
-                        st.rerun()
-
-        st.markdown("##### Company filter")
-        if not company_filters:
-            st.caption("Empty. Use **-** on a row or edit the sidebar.")
-        else:
-            for i, entry in enumerate(company_filters):
-                c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
-                with c_l:
-                    st.text(entry)
-                with c_r:
-                    if st.button("✕", key=f"co_f_remove_{i}", help="Remove from company filter"):
-                        remove_company_filter_entry(entry)
-                        st.toast("Removed company rule")
-                        st.rerun()
-
-        st.markdown("##### Category filter")
-        if not category_filters:
-            st.caption("Empty. Use **-** next to a category on a row or edit the sidebar.")
-        else:
-            for i, entry in enumerate(category_filters):
-                c_l, c_r = st.columns([0.92, 0.08], vertical_alignment="center")
-                with c_l:
-                    st.text(entry)
-                with c_r:
-                    if st.button("✕", key=f"cat_f_remove_{i}", help="Remove from category filter"):
-                        remove_category_filter_entry(entry)
-                        st.toast("Removed category rule")
-                        st.rerun()
-
-        st.divider()
         st.markdown("### Hidden by title filter")
         st.caption("Rows whose **title** matches any title-filter rule (same 30-day window).")
         render_hidden_insights(pd.DataFrame(excluded_title))

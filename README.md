@@ -18,8 +18,8 @@
 - Fetches from the public [Remotive remote jobs API](https://remotive.com/api/remote-jobs).
 - Keeps listings from the **last 30 days**.
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
-- **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row or edit the sidebar; remove rules on **Filters & hidden jobs**.
-- **Included jobs**: table, search, and pie charts for category / company / title mix.
+- **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
+- **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
 
 ---
 
