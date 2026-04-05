@@ -10,5 +10,6 @@ COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
 CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
 
 REMOTE_JOBS_URL = "https://remotive.com/api/remote-jobs"
+SERPAPI_SEARCH_URL = "https://serpapi.com/search"
 
 DEFAULT_FILTER_LIST: list[str] = []

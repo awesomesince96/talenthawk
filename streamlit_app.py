@@ -7,14 +7,18 @@ Run: uv run streamlit run streamlit_app.py
 from __future__ import annotations
 
 import html
+import os
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import (
-    fetch_remotive_jobs,
+    fetch_jobs_feed,
     filter_last_n_days,
     matches_text_filter,
 )
@@ -283,11 +287,38 @@ def annotate_jobs(jobs: list[dict]) -> list[dict]:
     return out
 
 
-def load_jobs_into_session() -> None:
+def _serpapi_key() -> str | None:
+    for env in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
+        v = os.environ.get(env, "").strip()
+        if v:
+            return v
     try:
-        raw = fetch_remotive_jobs()
-        st.session_state["jobs_raw"] = raw
-        st.session_state["jobs_source"] = "remotive_api"
+        sec = st.secrets.get("SERPAPI_API_KEY", "")
+        if sec and str(sec).strip():
+            return str(sec).strip()
+    except (FileNotFoundError, KeyError, AttributeError, RuntimeError):
+        pass
+    return None
+
+
+def load_jobs_into_session() -> None:
+    mode = str(st.session_state.get("jobs_fetch_mode", "remotive"))
+    if mode not in ("remotive", "serpapi", "both"):
+        mode = "remotive"
+    q = (st.session_state.get("serpapi_query") or "software engineer").strip()
+    loc = (st.session_state.get("serpapi_location") or "").strip() or None
+    pages = int(st.session_state.get("serpapi_pages", 3) or 3)
+    pages = max(1, min(5, pages))
+    try:
+        jobs, label = fetch_jobs_feed(
+            mode,
+            serpapi_api_key=_serpapi_key(),
+            serpapi_query=q,
+            serpapi_location=loc,
+            serpapi_max_pages=pages,
+        )
+        st.session_state["jobs_raw"] = jobs
+        st.session_state["jobs_source"] = label
         st.session_state.pop("jobs_error", None)
     except Exception as e:
         st.session_state["jobs_raw"] = []
@@ -317,6 +348,15 @@ def main() -> None:
     st.set_page_config(page_title="TalentHawk", layout="wide")
     ensure_persistence_defaults()
 
+    if "jobs_fetch_mode" not in st.session_state:
+        st.session_state["jobs_fetch_mode"] = "remotive"
+    if "serpapi_query" not in st.session_state:
+        st.session_state["serpapi_query"] = "software engineer remote"
+    if "serpapi_location" not in st.session_state:
+        st.session_state["serpapi_location"] = ""
+    if "serpapi_pages" not in st.session_state:
+        st.session_state["serpapi_pages"] = 3
+
     if "jobs_raw" not in st.session_state:
         with st.spinner("Fetching jobs…"):
             load_jobs_into_session()
@@ -336,16 +376,33 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Jobs")
-        if st.button("Refresh from Remotive API", type="primary"):
+        st.selectbox(
+            "Job source",
+            options=["remotive", "serpapi", "both"],
+            format_func=lambda x: {
+                "remotive": "Remotive (free, no API key)",
+                "serpapi": "SerpAPI — Google Jobs",
+                "both": "Remotive + SerpAPI (merged)",
+            }[x],
+            key="jobs_fetch_mode",
+        )
+        st.text_input("SerpAPI search query (`q`)", key="serpapi_query")
+        st.text_input("SerpAPI location (optional)", placeholder="e.g. United States", key="serpapi_location")
+        st.number_input("SerpAPI pages (10 jobs/page, max 5)", min_value=1, max_value=5, step=1, key="serpapi_pages")
+        if st.session_state.get("jobs_fetch_mode") in ("serpapi", "both"):
+            if not _serpapi_key():
+                st.warning("Set **SERPAPI_API_KEY** in the environment or `.streamlit/secrets.toml`.")
+
+        if st.button("Refresh jobs", type="primary"):
             with st.spinner("Fetching…"):
-                try:
-                    fresh = fetch_remotive_jobs()
-                    st.session_state["jobs_raw"] = fresh
-                    st.session_state["jobs_source"] = "remotive_api"
-                    st.session_state.pop("jobs_error", None)
-                    st.success(f"Loaded {len(fresh)} listings.")
-                except Exception as e:
-                    st.error(str(e))
+                load_jobs_into_session()
+                err = st.session_state.get("jobs_error")
+                n = len(st.session_state.get("jobs_raw") or [])
+                if err:
+                    st.error(err)
+                else:
+                    st.success(f"Loaded {n} listings ({st.session_state.get('jobs_source', '?')}).")
+
         src = st.session_state.get("jobs_source", "?")
         st.caption(f"Source: **{src}**")
         err = st.session_state.get("jobs_error")
@@ -356,7 +413,8 @@ def main() -> None:
 
     st.title("TalentHawk")
     st.caption(
-        "Last 30 days (Remotive). Use **-** on a row to add that value to a filter; use **✕** in the sidebar to remove a rule."
+        "Last 30 days (where a date is known). **Remotive** is free; **SerpAPI** uses [Google Jobs](https://serpapi.com/google-jobs-api) (paid API key). "
+        "Use **-** on a row to add a filter; **✕** in the sidebar removes it."
     )
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -370,7 +428,7 @@ def main() -> None:
     tab_inc, tab_hidden = st.tabs(["Included jobs", "Hidden jobs"])
 
     with tab_inc:
-        q = st.text_input("Search included jobs (id, title, company, category, pay)", "")
+        q = st.text_input("Search included jobs (id, title, company, category, pay, source)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
@@ -384,6 +442,8 @@ def main() -> None:
                     | df_i["category"].str.lower().str.contains(ql, na=False)
                     | pay_col.str.lower().str.contains(ql, na=False)
                 )
+                if "source" in df_i.columns:
+                    m = m | df_i["source"].fillna("").astype(str).str.lower().str.contains(ql, na=False)
                 df_show = df_i[m]
             else:
                 df_show = df_i
