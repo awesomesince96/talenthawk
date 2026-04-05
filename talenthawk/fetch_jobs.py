@@ -95,6 +95,6 @@ def matches_text_filter(value: str, patterns: list[str]) -> bool:
     return False
 
 
-def company_is_blocked(company: str, blocklist: list[str]) -> bool:
-    """Backward-compatible alias for :func:`matches_text_filter`."""
-    return matches_text_filter(company, blocklist)
+def company_is_blocked(company: str, patterns: list[str]) -> bool:
+    """Alias for :func:`matches_text_filter` (company name vs filter lines)."""
+    return matches_text_filter(company, patterns)

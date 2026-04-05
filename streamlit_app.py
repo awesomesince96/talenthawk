@@ -7,8 +7,6 @@ Run: uv run streamlit run streamlit_app.py
 from __future__ import annotations
 
 import html
-import json
-from datetime import datetime, timezone
 
 import pandas as pd
 import plotly.express as px
@@ -20,19 +18,13 @@ from talenthawk.fetch_jobs import (
     filter_last_n_days,
     matches_text_filter,
 )
-from talenthawk.settings import DEFAULT_CATEGORY_KEYWORDS
 from talenthawk.storage import (
     load_category_filters,
-    load_category_keywords,
     load_company_filters,
-    load_jobs_cache,
     load_title_filters,
-    migrate_legacy_company_blocklists_if_needed,
     persistence_paths,
     save_category_filters,
-    save_category_keywords,
     save_company_filters,
-    save_jobs_cache,
     save_title_filters,
 )
 
@@ -135,13 +127,12 @@ def apply_pending_filter_draft_refreshes() -> None:
 def ensure_persistence_defaults() -> None:
     paths = persistence_paths()
     paths["persistence_dir"].mkdir(parents=True, exist_ok=True)
-    migrate_legacy_company_blocklists_if_needed()
     if not paths["title_filter"].exists():
         save_title_filters([])
+    if not paths["company_filter"].exists():
+        save_company_filters([])
     if not paths["category_filter"].exists():
         save_category_filters([])
-    if not paths["category_keywords"].exists():
-        save_category_keywords([dict(x) for x in DEFAULT_CATEGORY_KEYWORDS])
 
 
 def add_company_filter(company: str) -> None:
@@ -232,7 +223,7 @@ def render_hidden_insights(df_e: pd.DataFrame) -> None:
     )
 
 
-def annotate_jobs(jobs: list[dict], categories: list[dict]) -> list[dict]:
+def annotate_jobs(jobs: list[dict]) -> list[dict]:
     out = []
     for j in jobs:
         title = j.get("title") or ""
@@ -244,7 +235,7 @@ def annotate_jobs(jobs: list[dict], categories: list[dict]) -> list[dict]:
             rid = raw.get("id")
             jid = str(rid).strip() if rid is not None and str(rid).strip() else ""
         job_id = str(jid).strip() if jid else ""
-        cat = categorize_title(title, categories)
+        cat = categorize_title(title)
         row = {
             **j,
             "job_id": job_id,
@@ -262,16 +253,11 @@ def load_jobs_into_session() -> None:
         raw = fetch_remotive_jobs()
         st.session_state["jobs_raw"] = raw
         st.session_state["jobs_source"] = "remotive_api"
+        st.session_state.pop("jobs_error", None)
     except Exception as e:
-        cache = load_jobs_cache()
-        if cache and isinstance(cache.get("jobs"), list):
-            st.session_state["jobs_raw"] = cache["jobs"]
-            st.session_state["jobs_source"] = f"disk_cache ({cache.get('fetched_at', '?')})"
-            st.session_state["jobs_error"] = str(e)
-        else:
-            st.session_state["jobs_raw"] = []
-            st.session_state["jobs_source"] = "none"
-            st.session_state["jobs_error"] = str(e)
+        st.session_state["jobs_raw"] = []
+        st.session_state["jobs_source"] = "none"
+        st.session_state["jobs_error"] = str(e)
 
 
 def job_is_included(
@@ -296,11 +282,6 @@ def main() -> None:
     st.set_page_config(page_title="TalentHawk", layout="wide")
     ensure_persistence_defaults()
     apply_pending_filter_draft_refreshes()
-
-    if "category_rules_draft" not in st.session_state:
-        st.session_state["category_rules_draft"] = json.dumps(
-            load_category_keywords(), indent=2, ensure_ascii=False
-        )
 
     if (
         "company_filter_draft" not in st.session_state
@@ -331,23 +312,6 @@ def main() -> None:
                     st.success(f"Loaded {len(raw)} listings.")
                 except Exception as e:
                     st.error(str(e))
-        if st.button("Load from saved cache file"):
-            cache = load_jobs_cache()
-            if cache and isinstance(cache.get("jobs"), list):
-                st.session_state["jobs_raw"] = cache["jobs"]
-                st.session_state["jobs_source"] = f"disk_cache ({cache.get('fetched_at', '?')})"
-                st.success(f"Loaded {len(cache['jobs'])} from cache.")
-            else:
-                st.warning("No cache file yet.")
-
-        if st.button("Save current listings to cache"):
-            raw = st.session_state.get("jobs_raw") or []
-            if raw:
-                save_jobs_cache(raw, datetime.now(timezone.utc).isoformat())
-                st.success("Saved under data/persistence/jobs_cache.json.")
-            else:
-                st.warning("Nothing to save.")
-
         src = st.session_state.get("jobs_source", "?")
         st.caption(f"Source: **{src}**")
         err = st.session_state.get("jobs_error")
@@ -357,7 +321,7 @@ def main() -> None:
         st.header("Filters (manual edit)")
         st.caption(
             "One pattern per line. Matching is case-insensitive; a line can match as a substring either way "
-            "(title, company, or **derived category** label from your keyword rules)."
+            "(title, company, or **category** label inferred from the job title)."
         )
 
         st.markdown("**Title filter**")
@@ -389,7 +353,7 @@ def main() -> None:
                 st.rerun()
 
         st.markdown("**Category filter**")
-        st.caption("Matches the **classified** category (e.g. Engineering, Other), not raw title text.")
+        st.caption("Matches the **category** inferred from the title (e.g. Engineering, Other), not raw title text.")
         st.text_area("Category filter lines", height=90, label_visibility="collapsed", key="category_filter_draft")
         c_g1, c_g2 = st.columns(2)
         with c_g1:
@@ -411,10 +375,9 @@ def main() -> None:
     title_filters = load_title_filters()
     company_filters = load_company_filters()
     category_filters = load_category_filters()
-    categories = load_category_keywords()
 
     windowed = filter_last_n_days(raw, days=30)
-    annotated = annotate_jobs(windowed, categories)
+    annotated = annotate_jobs(windowed)
 
     included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
     excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
@@ -429,7 +392,7 @@ def main() -> None:
     c5.metric("Hidden (company)", len(excluded_company))
     c6.metric("Hidden (category)", len(excluded_category))
 
-    tab_inc, tab_filt, tab_rules = st.tabs(["Included jobs", "Filters & hidden jobs", "Category rules"])
+    tab_inc, tab_filt = st.tabs(["Included jobs", "Filters & hidden jobs"])
 
     with tab_inc:
         q = st.text_input("Search included jobs (id, title, company, category, pay)", "")
@@ -549,7 +512,7 @@ def main() -> None:
             df_i,
             "category",
             subheader="Category distribution (included)",
-            dimension_description="derived category (from your keyword rules)",
+            dimension_description="category inferred from job title",
             other_noun="categories",
             empty_caption="No categories to chart.",
         )
@@ -628,38 +591,8 @@ def main() -> None:
 
         st.divider()
         st.markdown("### Hidden by category filter")
-        st.caption("Rows whose **derived category** label matches any category-filter rule (same 30-day window).")
+        st.caption("Rows whose **category** label matches any category-filter rule (same 30-day window).")
         render_hidden_insights(pd.DataFrame(excluded_category))
-
-    with tab_rules:
-        st.write(
-            "Rules drive title categories (first keyword match wins; otherwise **Other**). "
-            "You can also edit `data/persistence/category_keywords.json` directly."
-        )
-        st.text_area(
-            "Category rules (JSON array)",
-            height=400,
-            key="category_rules_draft",
-        )
-        col_save, col_reset = st.columns(2)
-        with col_save:
-            if st.button("Save category rules"):
-                try:
-                    draft = st.session_state.get("category_rules_draft", "")
-                    parsed = json.loads(draft)
-                    if not isinstance(parsed, list):
-                        raise ValueError("Root must be a JSON array")
-                    save_category_keywords(parsed)
-                    st.session_state["category_rules_draft"] = json.dumps(parsed, indent=2, ensure_ascii=False)
-                    st.success("Saved.")
-                except Exception as e:
-                    st.error(f"Invalid JSON: {e}")
-        with col_reset:
-            if st.button("Reload rules from disk"):
-                st.session_state["category_rules_draft"] = json.dumps(
-                    load_category_keywords(), indent=2, ensure_ascii=False
-                )
-                st.rerun()
 
 
 if __name__ == "__main__":
