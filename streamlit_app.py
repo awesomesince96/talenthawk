@@ -1,7 +1,7 @@
 """
 TalentHawk — browse recent remote jobs, filter by title, company, and derived category.
 
-Run: uv run streamlit run streamlit_app.py
+Run: uv run streamlit run streamlit_app.py — then use **Refresh jobs** in the sidebar to fetch feeds.
 """
 
 from __future__ import annotations
@@ -39,6 +39,21 @@ MAX_PAY_LEN = 28
 MAX_CATEGORY_LEN = 22
 TITLE_DIST_TOP_N = 25
 TITLE_DIST_CHART_MAX = 56
+
+RECENCY_DAY_CHOICES = (1, 3, 7, 14, 30)
+
+
+def _format_recency_days(n: int) -> str:
+    if n == 1:
+        return "Last 1 day"
+    return f"Last {n} days"
+
+
+def _recency_window_phrase(n: int) -> str:
+    """Natural phrase for captions, e.g. 'the last day' / 'the last 7 days'."""
+    if n == 1:
+        return "the last day"
+    return f"the last {n} days"
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -356,17 +371,23 @@ def main() -> None:
         st.session_state["serpapi_location"] = ""
     if "serpapi_pages" not in st.session_state:
         st.session_state["serpapi_pages"] = 3
+    if "jobs_recency_days" not in st.session_state:
+        st.session_state["jobs_recency_days"] = 30
 
     if "jobs_raw" not in st.session_state:
-        with st.spinner("Fetching jobs…"):
-            load_jobs_into_session()
+        st.session_state["jobs_raw"] = []
+
+    jobs_not_yet_loaded = "jobs_source" not in st.session_state
 
     raw = st.session_state.get("jobs_raw") or []
     title_filters = load_title_filters()
     company_filters = load_company_filters()
     category_filters = load_category_filters()
 
-    windowed = filter_last_n_days(raw, days=30)
+    days_window = int(st.session_state.get("jobs_recency_days", 30) or 30)
+    if days_window not in RECENCY_DAY_CHOICES:
+        days_window = 30
+    windowed = filter_last_n_days(raw, days=days_window)
     annotated = annotate_jobs(windowed)
 
     included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
@@ -376,6 +397,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Jobs")
+        st.caption("Feeds run only when you click **Refresh jobs** (no auto-fetch on load).")
         st.selectbox(
             "Job source",
             options=["remotive", "serpapi", "both"],
@@ -385,6 +407,12 @@ def main() -> None:
                 "both": "Remotive + SerpAPI (merged)",
             }[x],
             key="jobs_fetch_mode",
+        )
+        st.selectbox(
+            "Posted within",
+            options=list(RECENCY_DAY_CHOICES),
+            format_func=_format_recency_days,
+            key="jobs_recency_days",
         )
         st.text_input("SerpAPI search query (`q`)", key="serpapi_query")
         st.text_input("SerpAPI location (optional)", placeholder="e.g. United States", key="serpapi_location")
@@ -403,23 +431,28 @@ def main() -> None:
                 else:
                     st.success(f"Loaded {n} listings ({st.session_state.get('jobs_source', '?')}).")
 
-        src = st.session_state.get("jobs_source", "?")
-        st.caption(f"Source: **{src}**")
+        if jobs_not_yet_loaded:
+            st.caption("**Source:** not loaded yet")
+        else:
+            src = st.session_state.get("jobs_source", "?")
+            st.caption(f"**Source:** {src}")
         err = st.session_state.get("jobs_error")
-        if err:
+        if err and not jobs_not_yet_loaded:
             st.caption(f"Last fetch error: {err}")
 
         render_sidebar_filters(title_filters, company_filters, category_filters)
 
     st.title("TalentHawk")
     st.caption(
-        "Last 30 days (where a date is known). **Remotive** is free; **SerpAPI** uses [Google Jobs](https://serpapi.com/google-jobs-api) (paid API key). "
+        f"Posted within {_recency_window_phrase(days_window)} when a date is known. **Remotive** is free; **SerpAPI** uses [Google Jobs](https://serpapi.com/google-jobs-api) (paid API key). "
         "Use **-** on a row to add a filter; **✕** in the sidebar removes it."
     )
+    if jobs_not_yet_loaded:
+        st.info("Click **Refresh jobs** in the sidebar to fetch from **Remotive** and/or **SerpAPI** (per your job source).")
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Fetched (feed)", len(raw))
-    c2.metric("Last 30 days", len(windowed))
+    c2.metric(_format_recency_days(days_window), len(windowed))
     c3.metric("Shown (included)", len(included))
     c4.metric("Hidden (title)", len(excluded_title))
     c5.metric("Hidden (company)", len(excluded_company))
@@ -541,7 +574,10 @@ def main() -> None:
                         else:
                             st.caption("—")
         else:
-            st.info("No jobs in the 30-day window (or feed is empty).")
+            if jobs_not_yet_loaded:
+                st.caption("Load listings with **Refresh jobs** in the sidebar.")
+            else:
+                st.info(f"No jobs in {_recency_window_phrase(days_window)} (or feed is empty).")
 
         _render_top_n_pie(
             df_i,
@@ -571,21 +607,21 @@ def main() -> None:
     with tab_hidden:
         st.subheader("Hidden jobs")
         st.caption(
-            "Same 30-day window as **Included jobs**. Remove filter rules with **✕** in the left **Filters** panel."
+            f"Same time window as **Included jobs** ({_recency_window_phrase(days_window)}). Remove filter rules with **✕** in the left **Filters** panel."
         )
 
         st.markdown("### Hidden by title filter")
-        st.caption("Rows whose **title** matches any title-filter rule (same 30-day window).")
+        st.caption(f"Rows whose **title** matches any title-filter rule ({_recency_window_phrase(days_window)}).")
         render_hidden_insights(pd.DataFrame(excluded_title))
 
         st.divider()
         st.markdown("### Hidden by company filter")
-        st.caption("Rows whose **company** matches any company-filter rule (same 30-day window).")
+        st.caption(f"Rows whose **company** matches any company-filter rule ({_recency_window_phrase(days_window)}).")
         render_hidden_insights(pd.DataFrame(excluded_company))
 
         st.divider()
         st.markdown("### Hidden by category filter")
-        st.caption("Rows whose **category** label matches any category-filter rule (same 30-day window).")
+        st.caption(f"Rows whose **category** label matches any category-filter rule ({_recency_window_phrase(days_window)}).")
         render_hidden_insights(pd.DataFrame(excluded_category))
 
 

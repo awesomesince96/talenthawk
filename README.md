@@ -15,8 +15,8 @@
 
 ## What it does
 
-- **Job sources** (sidebar): **Remotive** (free, open API) and/or **SerpAPI [Google Jobs](https://serpapi.com/google-jobs-api)** (paid key; richer volume). **Merged** mode dedupes by title + company + URL.
-- Keeps listings from the **last 30 days** when a post date is present; SerpAPI rows with only relative text (“5 days ago”) are normalized when possible, otherwise kept in-window so they are not dropped silently.
+- **Job sources** (sidebar): **Remotive** (free, open API) and/or **SerpAPI [Google Jobs](https://serpapi.com/google-jobs-api)** (paid key; richer volume). **Merged** mode dedupes by title + company + URL. Listings load only when you click **Refresh jobs** (no automatic fetch on startup).
+- **Posted within** sidebar control: **1, 3, 7, 14, or 30 days** (default 30) when a post date is present; SerpAPI rows with only relative text (“5 days ago”) are normalized when possible, otherwise kept so they are not dropped silently.
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
 - **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
@@ -33,6 +33,8 @@ cd talenthawk
 uv sync
 uv run streamlit run streamlit_app.py
 ```
+
+Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 
 ### SerpAPI (optional)
 
