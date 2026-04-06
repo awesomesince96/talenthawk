@@ -255,7 +255,7 @@ def render_hidden_insights(df_e: pd.DataFrame) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "job_id": st.column_config.TextColumn("ID"),
+            "job_id": st.column_config.TextColumn("Job ID"),
             "url": st.column_config.LinkColumn("Link"),
             "salary": st.column_config.TextColumn("Pay"),
         },
@@ -467,7 +467,7 @@ def main() -> None:
 
                 _colw = [0.52, 1.78, 0.26, 1.12, 0.26, 0.52, 0.26, 0.85, 0.44]
                 hdr = st.columns(_colw, vertical_alignment="center")
-                hdr[0].markdown("**ID**")
+                hdr[0].markdown("**Job ID**")
                 hdr[1].markdown("**Title**")
                 hdr[2].markdown("** **")
                 hdr[3].markdown("**Company**")

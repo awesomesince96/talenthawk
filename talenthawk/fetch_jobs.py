@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -116,6 +119,38 @@ def _serpapi_job_posted_at_iso(j: dict[str, Any]) -> str:
     return ""
 
 
+def _serpapi_display_job_id(j: dict[str, Any], title: str, company: str, url: str) -> str:
+    """
+    SerpAPI Google Jobs often returns ``job_id`` as a long base64 JSON blob.
+    Prefer the inner ``htidocid`` (short, stable) for display; else a compact hash.
+    """
+    raw = j.get("job_id")
+    s = str(raw).strip() if raw is not None else ""
+
+    def compact_fallback() -> str:
+        h = hashlib.sha256(f"{title}\0{company}\0{url}".encode()).hexdigest()[:14]
+        return f"serp:{h}"
+
+    if not s:
+        return compact_fallback()
+
+    # Long tokens are almost always base64(JSON); extract htidocid when possible.
+    if len(s) > 48:
+        try:
+            pad = (-len(s)) % 4
+            blob = base64.b64decode(s + "=" * pad, validate=False)
+            payload = json.loads(blob.decode("utf-8"))
+            if isinstance(payload, dict):
+                ht = payload.get("htidocid")
+                if isinstance(ht, str) and ht.strip():
+                    return ht.strip()
+        except (binascii.Error, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        return compact_fallback()
+
+    return s
+
+
 def _normalize_serpapi_job(j: dict[str, Any]) -> dict[str, Any]:
     title = (j.get("title") or "").strip()
     company = (j.get("company_name") or "").strip()
@@ -128,11 +163,7 @@ def _normalize_serpapi_job(j: dict[str, Any]) -> dict[str, Any]:
             url = str(first.get("link") or "").strip()
     if not url:
         url = str(j.get("share_link") or "").strip()
-    jid = j.get("job_id")
-    job_id = str(jid).strip() if jid is not None and str(jid).strip() else ""
-    if not job_id and title:
-        h = hashlib.sha256(f"{title}\0{company}".encode()).hexdigest()[:14]
-        job_id = f"serp:{h}"
+    job_id = _serpapi_display_job_id(j, title, company, url)
     salary = ""
     if isinstance(j.get("extensions"), list):
         salary = " · ".join(str(x) for x in j["extensions"][:3] if isinstance(x, str))[:200]
