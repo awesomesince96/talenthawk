@@ -8,8 +8,12 @@ PERSISTENCE_DIR = DATA_DIR / "persistence"
 TITLE_FILTER_FILE = PERSISTENCE_DIR / "title_filter.json"
 COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
 CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
+SERPAPI_PREFS_FILE = PERSISTENCE_DIR / "serpapi_prefs.json"
 
 REMOTE_JOBS_URL = "https://remotive.com/api/remote-jobs"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search"
 
 DEFAULT_FILTER_LIST: list[str] = []
+
+DEFAULT_SERPAPI_QUERY = "software engineer remote"
+DEFAULT_SERPAPI_LOCATION = ""

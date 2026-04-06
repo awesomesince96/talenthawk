@@ -1,4 +1,4 @@
-"""Local JSON persistence for title, company, and category filters."""
+"""Local JSON persistence for filters and SerpAPI sidebar preferences."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ from talenthawk.settings import (
     CATEGORY_FILTER_FILE,
     COMPANY_FILTER_FILE,
     DEFAULT_FILTER_LIST,
+    DEFAULT_SERPAPI_LOCATION,
+    DEFAULT_SERPAPI_QUERY,
     PERSISTENCE_DIR,
+    SERPAPI_PREFS_FILE,
     TITLE_FILTER_FILE,
 )
 
@@ -69,10 +72,36 @@ def save_category_filters(entries: list[str]) -> None:
     _write_json(CATEGORY_FILTER_FILE, cleaned)
 
 
+def load_serpapi_prefs() -> dict[str, str]:
+    """Last saved SerpAPI search query and location (local file only)."""
+    default: dict[str, str] = {
+        "query": DEFAULT_SERPAPI_QUERY,
+        "location": DEFAULT_SERPAPI_LOCATION,
+    }
+    raw = _read_json(SERPAPI_PREFS_FILE, default.copy())
+    if not isinstance(raw, dict):
+        return default.copy()
+    q = raw.get("query")
+    loc = raw.get("location")
+    out_q = str(q).strip() if q is not None else DEFAULT_SERPAPI_QUERY
+    if not out_q:
+        out_q = DEFAULT_SERPAPI_QUERY
+    out_loc = str(loc).strip() if loc is not None else DEFAULT_SERPAPI_LOCATION
+    return {"query": out_q, "location": out_loc}
+
+
+def save_serpapi_prefs(query: str, location: str) -> None:
+    """Persist SerpAPI query/location after a refresh (or attempted refresh)."""
+    q = (query or "").strip() or DEFAULT_SERPAPI_QUERY
+    loc = (location or "").strip()
+    _write_json(SERPAPI_PREFS_FILE, {"query": q, "location": loc})
+
+
 def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
         "title_filter": TITLE_FILTER_FILE,
         "company_filter": COMPANY_FILTER_FILE,
         "category_filter": CATEGORY_FILTER_FILE,
+        "serpapi_prefs": SERPAPI_PREFS_FILE,
     }

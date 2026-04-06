@@ -59,8 +59,9 @@ Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 | `title_filter.json` | Lines matched against job **title**; hits are hidden from the main view. |
 | `company_filter.json` | Lines matched against **company** name. |
 | `category_filter.json` | Lines matched against the **inferred category** label. |
+| `serpapi_prefs.json` | **SerpAPI** search **query** and **location** — loaded on startup, saved when you **Refresh jobs** (local only; not sent to any API until refresh). |
 
-Empty lists `[]` are created on first run if files are missing.
+Empty filter files default to `[]` if missing. `serpapi_prefs.json` appears after the first refresh (or you can create it by hand).
 
 ---
 
@@ -74,7 +75,7 @@ talenthawk/
 ├── talenthawk/
 │   ├── fetch_jobs.py    # fetch + normalize + date window
 │   ├── categorize.py    # title → category (built-in rules)
-│   ├── storage.py       # filter JSON only
+│   ├── storage.py       # filter + SerpAPI prefs JSON
 │   └── settings.py      # paths + API URL
 └── data/persistence/    # filter JSON (see above)
 ```

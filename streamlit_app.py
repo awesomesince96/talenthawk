@@ -25,10 +25,12 @@ from talenthawk.fetch_jobs import (
 from talenthawk.storage import (
     load_category_filters,
     load_company_filters,
+    load_serpapi_prefs,
     load_title_filters,
     persistence_paths,
     save_category_filters,
     save_company_filters,
+    save_serpapi_prefs,
     save_title_filters,
 )
 
@@ -195,48 +197,49 @@ def render_sidebar_filters(
         "Substring match, case-insensitive. Press **-** on a row in **Included jobs** to add a rule; **✕** here removes it."
     )
 
-    st.markdown("**Title**")
-    if not title_filters:
-        st.caption("—")
-    else:
-        for i, entry in enumerate(title_filters):
-            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
-            with c_l:
-                st.text(_truncate(entry, 42))
-            with c_r:
-                if st.button("✕", key=f"sb_title_rm_{i}", help="Remove from title filter"):
-                    remove_title_filter_entry(entry)
-                    st.toast("Removed title rule")
-                    st.rerun()
+    nt, nc, ng = len(title_filters), len(company_filters), len(category_filters)
+    with st.expander(f"Title ({nt})", expanded=False):
+        if not title_filters:
+            st.caption("No rules yet.")
+        else:
+            for i, entry in enumerate(title_filters):
+                c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+                with c_l:
+                    st.text(_truncate(entry, 42))
+                with c_r:
+                    if st.button("✕", key=f"sb_title_rm_{i}", help="Remove from title filter"):
+                        remove_title_filter_entry(entry)
+                        st.toast("Removed title rule")
+                        st.rerun()
 
-    st.markdown("**Company**")
-    if not company_filters:
-        st.caption("—")
-    else:
-        for i, entry in enumerate(company_filters):
-            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
-            with c_l:
-                st.text(_truncate(entry, 42))
-            with c_r:
-                if st.button("✕", key=f"sb_co_rm_{i}", help="Remove from company filter"):
-                    remove_company_filter_entry(entry)
-                    st.toast("Removed company rule")
-                    st.rerun()
+    with st.expander(f"Company ({nc})", expanded=False):
+        if not company_filters:
+            st.caption("No rules yet.")
+        else:
+            for i, entry in enumerate(company_filters):
+                c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+                with c_l:
+                    st.text(_truncate(entry, 42))
+                with c_r:
+                    if st.button("✕", key=f"sb_co_rm_{i}", help="Remove from company filter"):
+                        remove_company_filter_entry(entry)
+                        st.toast("Removed company rule")
+                        st.rerun()
 
-    st.markdown("**Category**")
-    if not category_filters:
-        st.caption("Inferred from title — none yet.")
-    else:
-        st.caption("Inferred label, not raw title.")
-        for i, entry in enumerate(category_filters):
-            c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
-            with c_l:
-                st.text(_truncate(entry, 36))
-            with c_r:
-                if st.button("✕", key=f"sb_cat_rm_{i}", help="Remove from category filter"):
-                    remove_category_filter_entry(entry)
-                    st.toast("Removed category rule")
-                    st.rerun()
+    with st.expander(f"Category ({ng})", expanded=False):
+        if not category_filters:
+            st.caption("Inferred from job title — none yet.")
+        else:
+            st.caption("Inferred label, not raw title.")
+            for i, entry in enumerate(category_filters):
+                c_l, c_r = st.columns([0.78, 0.22], vertical_alignment="center")
+                with c_l:
+                    st.text(_truncate(entry, 36))
+                with c_r:
+                    if st.button("✕", key=f"sb_cat_rm_{i}", help="Remove from category filter"):
+                        remove_category_filter_entry(entry)
+                        st.toast("Removed category rule")
+                        st.rerun()
 
     with st.expander("Persistence paths"):
         for label, path in persistence_paths().items():
@@ -339,6 +342,11 @@ def load_jobs_into_session() -> None:
         st.session_state["jobs_raw"] = []
         st.session_state["jobs_source"] = "none"
         st.session_state["jobs_error"] = str(e)
+    finally:
+        save_serpapi_prefs(
+            str(st.session_state.get("serpapi_query") or ""),
+            str(st.session_state.get("serpapi_location") or ""),
+        )
 
 
 def job_is_included(
@@ -366,9 +374,9 @@ def main() -> None:
     if "jobs_fetch_mode" not in st.session_state:
         st.session_state["jobs_fetch_mode"] = "remotive"
     if "serpapi_query" not in st.session_state:
-        st.session_state["serpapi_query"] = "software engineer remote"
-    if "serpapi_location" not in st.session_state:
-        st.session_state["serpapi_location"] = ""
+        prefs = load_serpapi_prefs()
+        st.session_state["serpapi_query"] = prefs["query"]
+        st.session_state["serpapi_location"] = prefs["location"]
     if "serpapi_pages" not in st.session_state:
         st.session_state["serpapi_pages"] = 3
     if "jobs_recency_days" not in st.session_state:
@@ -414,8 +422,17 @@ def main() -> None:
             format_func=_format_recency_days,
             key="jobs_recency_days",
         )
-        st.text_input("SerpAPI search query (`q`)", key="serpapi_query")
-        st.text_input("SerpAPI location (optional)", placeholder="e.g. United States", key="serpapi_location")
+        st.text_input(
+            "SerpAPI search query (`q`)",
+            key="serpapi_query",
+            help="Stored in data/persistence/serpapi_prefs.json when you Refresh jobs; SerpAPI runs only on refresh.",
+        )
+        st.text_input(
+            "SerpAPI location (optional)",
+            placeholder="e.g. United States",
+            key="serpapi_location",
+            help="Stored locally with the query on Refresh jobs; sent to SerpAPI only when you refresh.",
+        )
         st.number_input("SerpAPI pages (10 jobs/page, max 5)", min_value=1, max_value=5, step=1, key="serpapi_pages")
         if st.session_state.get("jobs_fetch_mode") in ("serpapi", "both"):
             if not _serpapi_key():
