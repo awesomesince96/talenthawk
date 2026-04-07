@@ -34,7 +34,6 @@ from talenthawk.storage import (
     save_title_filters,
 )
 
-PAGE_SIZE = 25
 MAX_TITLE_LEN = 72
 MAX_COMPANY_LEN = 36
 MAX_PAY_LEN = 28
@@ -77,7 +76,8 @@ def _render_top_n_pie(
     top_n: int = TITLE_DIST_TOP_N,
 ) -> None:
     """Pie of value counts for ``column``; top ``top_n`` slices plus **Other** when needed."""
-    st.subheader(subheader)
+    if subheader:
+        st.subheader(subheader)
     if df.empty or column not in df.columns:
         st.caption(empty_caption)
         return
@@ -385,23 +385,9 @@ def main() -> None:
     if "jobs_raw" not in st.session_state:
         st.session_state["jobs_raw"] = []
 
-    jobs_not_yet_loaded = "jobs_source" not in st.session_state
-
-    raw = st.session_state.get("jobs_raw") or []
     title_filters = load_title_filters()
     company_filters = load_company_filters()
     category_filters = load_category_filters()
-
-    days_window = int(st.session_state.get("jobs_recency_days", 30) or 30)
-    if days_window not in RECENCY_DAY_CHOICES:
-        days_window = 30
-    windowed = filter_last_n_days(raw, days=days_window)
-    annotated = annotate_jobs(windowed)
-
-    included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
-    excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
-    excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
-    excluded_category = [j for j in annotated if matches_text_filter(j["category"], category_filters)]
 
     with st.sidebar:
         st.header("Jobs")
@@ -448,23 +434,39 @@ def main() -> None:
                 else:
                     st.success(f"Loaded {n} listings ({st.session_state.get('jobs_source', '?')}).")
 
-        if jobs_not_yet_loaded:
+        has_fetched_jobs = "jobs_source" in st.session_state
+        if not has_fetched_jobs:
             st.caption("**Source:** not loaded yet")
         else:
             src = st.session_state.get("jobs_source", "?")
             st.caption(f"**Source:** {src}")
         err = st.session_state.get("jobs_error")
-        if err and not jobs_not_yet_loaded:
+        if err and has_fetched_jobs:
             st.caption(f"Last fetch error: {err}")
 
         render_sidebar_filters(title_filters, company_filters, category_filters)
+
+    # After sidebar widgets + optional refresh: re-read jobs so the first Refresh click updates the main area
+    # in the same run (Streamlit executes top-to-bottom).
+    has_fetched_jobs = "jobs_source" in st.session_state
+    days_window = int(st.session_state.get("jobs_recency_days", 30) or 30)
+    if days_window not in RECENCY_DAY_CHOICES:
+        days_window = 30
+    raw = st.session_state.get("jobs_raw") or []
+    windowed = filter_last_n_days(raw, days=days_window)
+    annotated = annotate_jobs(windowed)
+
+    included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
+    excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
+    excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
+    excluded_category = [j for j in annotated if matches_text_filter(j["category"], category_filters)]
 
     st.title("TalentHawk")
     st.caption(
         f"Posted within {_recency_window_phrase(days_window)} when a date is known. **Remotive** is free; **SerpAPI** uses [Google Jobs](https://serpapi.com/google-jobs-api) (paid API key). "
         "Use **-** on a row to add a filter; **✕** in the sidebar removes it."
     )
-    if jobs_not_yet_loaded:
+    if not has_fetched_jobs:
         st.info("Click **Refresh jobs** in the sidebar to fetch from **Remotive** and/or **SerpAPI** (per your job source).")
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -498,128 +500,123 @@ def main() -> None:
             else:
                 df_show = df_i
 
-            st.caption(
-                "**Title**, **Company**, and **Category** each have **-** to exclude that value (add to the matching filter). "
-                "**Pay** and **Open** come from the feed when available."
-            )
             n_show = len(df_show)
             if n_show == 0:
                 st.info("No rows match your search.")
             else:
-                total_pages = max(1, (n_show + PAGE_SIZE - 1) // PAGE_SIZE)
-                page_key = "included_jobs_page"
-                if page_key in st.session_state and int(st.session_state[page_key]) > total_pages:
-                    st.session_state[page_key] = total_pages
-                page = st.number_input("Page", min_value=1, max_value=total_pages, step=1, key=page_key)
-                start = (int(page) - 1) * PAGE_SIZE
-                chunk = df_show.iloc[start : start + PAGE_SIZE]
-                st.caption(f"Showing {start + 1}–{min(start + PAGE_SIZE, n_show)} of {n_show}")
+                st.caption(
+                    f"{n_show} row{'s' if n_show != 1 else ''} · **−** adds a title / company / category filter · **Pay** / **Open** from the feed"
+                )
 
                 _colw = [0.52, 1.78, 0.26, 1.12, 0.26, 0.52, 0.26, 0.85, 0.44]
-                hdr = st.columns(_colw, vertical_alignment="center")
-                hdr[0].markdown("**Job ID**")
-                hdr[1].markdown("**Title**")
-                hdr[2].markdown("** **")
-                hdr[3].markdown("**Company**")
-                hdr[4].markdown("** **")
-                hdr[5].markdown("**Cat**")
-                hdr[6].markdown("** **")
-                hdr[7].markdown("**Pay**")
-                hdr[8].markdown("**Link**")
+                with st.container(height=520, border=True):
+                    hdr = st.columns(_colw, vertical_alignment="center")
+                    hdr[0].markdown("**Job ID**")
+                    hdr[1].markdown("**Title**")
+                    hdr[2].markdown("** **")
+                    hdr[3].markdown("**Company**")
+                    hdr[4].markdown("** **")
+                    hdr[5].markdown("**Cat**")
+                    hdr[6].markdown("** **")
+                    hdr[7].markdown("**Pay**")
+                    hdr[8].markdown("**Link**")
 
-                for pos in range(len(chunk)):
-                    row = chunk.iloc[pos]
-                    job_id = str(row.get("job_id", "") or "").strip()
-                    title = str(row.get("title", "") or "")
-                    company = str(row.get("company", "") or "").strip()
-                    category = str(row.get("category", "") or "")
-                    salary = str(row.get("salary", "") or "").strip()
-                    url = str(row.get("url", "") or "").strip()
-                    row_key = f"{start}_{pos}"
+                    for pos in range(n_show):
+                        row = df_show.iloc[pos]
+                        job_id = str(row.get("job_id", "") or "").strip()
+                        title = str(row.get("title", "") or "")
+                        company = str(row.get("company", "") or "").strip()
+                        category = str(row.get("category", "") or "")
+                        salary = str(row.get("salary", "") or "").strip()
+                        url = str(row.get("url", "") or "").strip()
+                        row_key = f"inc_{pos}"
 
-                    cols = st.columns(_colw, vertical_alignment="center")
-                    with cols[0]:
-                        st.text(job_id if job_id else "—")
-                    with cols[1]:
-                        st.text(_truncate(title, MAX_TITLE_LEN))
-                    with cols[2]:
-                        t_disabled = not title or matches_text_filter(title, title_filters)
-                        if st.button(
-                            "-",
-                            key=f"tf_{row_key}",
-                            help="Exclude jobs matching this title",
-                            disabled=t_disabled,
-                        ):
-                            add_title_filter(title)
-                            st.toast("Title excluded (filter updated)")
-                            st.rerun()
-                    with cols[3]:
-                        st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
-                    with cols[4]:
-                        c_disabled = not company or matches_text_filter(company, company_filters)
-                        if st.button(
-                            "-",
-                            key=f"cf_{row_key}",
-                            help="Exclude jobs from this company",
-                            disabled=c_disabled,
-                        ):
-                            add_company_filter(company)
-                            st.toast("Company excluded (filter updated)")
-                            st.rerun()
-                    with cols[5]:
-                        st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
-                    with cols[6]:
-                        g_disabled = not category or matches_text_filter(category, category_filters)
-                        if st.button(
-                            "-",
-                            key=f"gf_{row_key}",
-                            help="Exclude jobs in this category",
-                            disabled=g_disabled,
-                        ):
-                            add_category_filter(category)
-                            st.toast("Category excluded (filter updated)")
-                            st.rerun()
-                    with cols[7]:
-                        st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
-                    with cols[8]:
-                        if url:
-                            safe = html.escape(url, quote=True)
-                            st.markdown(
-                                f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
-                                unsafe_allow_html=True,
-                            )
-                        else:
-                            st.caption("—")
+                        cols = st.columns(_colw, vertical_alignment="center")
+                        with cols[0]:
+                            st.text(job_id if job_id else "—")
+                        with cols[1]:
+                            st.text(_truncate(title, MAX_TITLE_LEN))
+                        with cols[2]:
+                            t_disabled = not title or matches_text_filter(title, title_filters)
+                            if st.button(
+                                "-",
+                                key=f"tf_{row_key}",
+                                help="Exclude jobs matching this title",
+                                disabled=t_disabled,
+                            ):
+                                add_title_filter(title)
+                                st.toast("Title excluded (filter updated)")
+                                st.rerun()
+                        with cols[3]:
+                            st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
+                        with cols[4]:
+                            c_disabled = not company or matches_text_filter(company, company_filters)
+                            if st.button(
+                                "-",
+                                key=f"cf_{row_key}",
+                                help="Exclude jobs from this company",
+                                disabled=c_disabled,
+                            ):
+                                add_company_filter(company)
+                                st.toast("Company excluded (filter updated)")
+                                st.rerun()
+                        with cols[5]:
+                            st.text(_truncate(category, MAX_CATEGORY_LEN) if category else "—")
+                        with cols[6]:
+                            g_disabled = not category or matches_text_filter(category, category_filters)
+                            if st.button(
+                                "-",
+                                key=f"gf_{row_key}",
+                                help="Exclude jobs in this category",
+                                disabled=g_disabled,
+                            ):
+                                add_category_filter(category)
+                                st.toast("Category excluded (filter updated)")
+                                st.rerun()
+                        with cols[7]:
+                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                        with cols[8]:
+                            if url:
+                                safe = html.escape(url, quote=True)
+                                st.markdown(
+                                    f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.caption("—")
         else:
-            if jobs_not_yet_loaded:
+            if not has_fetched_jobs:
                 st.caption("Load listings with **Refresh jobs** in the sidebar.")
             else:
                 st.info(f"No jobs in {_recency_window_phrase(days_window)} (or feed is empty).")
 
-        _render_top_n_pie(
-            df_i,
-            "category",
-            subheader="Category distribution (included)",
-            dimension_description="category inferred from job title",
-            other_noun="categories",
-            empty_caption="No categories to chart.",
-        )
-        _render_top_n_pie(
-            df_i,
-            "company",
-            subheader="Company distribution (included)",
-            dimension_description="company name",
-            other_noun="companies",
-            empty_caption="No companies to chart.",
-        )
-        _render_top_n_pie(
-            df_i,
-            "title",
-            subheader="Job title distribution (included)",
-            dimension_description="exact job title",
-            other_noun="titles",
-            empty_caption="No titles to chart.",
-        )
+        with st.expander("Category distribution (included)", expanded=False):
+            _render_top_n_pie(
+                df_i,
+                "category",
+                subheader="",
+                dimension_description="category inferred from job title",
+                other_noun="categories",
+                empty_caption="No categories to chart.",
+            )
+        with st.expander("Company distribution (included)", expanded=False):
+            _render_top_n_pie(
+                df_i,
+                "company",
+                subheader="",
+                dimension_description="company name",
+                other_noun="companies",
+                empty_caption="No companies to chart.",
+            )
+        with st.expander("Job title distribution (included)", expanded=False):
+            _render_top_n_pie(
+                df_i,
+                "title",
+                subheader="",
+                dimension_description="exact job title",
+                other_noun="titles",
+                empty_caption="No titles to chart.",
+            )
 
     with tab_hidden:
         st.subheader("Hidden jobs")
