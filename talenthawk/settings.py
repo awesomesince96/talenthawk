@@ -15,5 +15,5 @@ SERPAPI_SEARCH_URL = "https://serpapi.com/search"
 
 DEFAULT_FILTER_LIST: list[str] = []
 
-DEFAULT_SERPAPI_QUERY = "software engineer remote"
-DEFAULT_SERPAPI_LOCATION = ""
+DEFAULT_SERPAPI_QUERY = "software engineer"
+DEFAULT_SERPAPI_LOCATION = "austin"
