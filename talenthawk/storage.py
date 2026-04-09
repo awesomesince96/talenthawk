@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from talenthawk.settings import (
+    CAREER_PAGE_MAPPINGS_FILE,
+    CAREER_PAGE_TRACKER_FILTER_FILE,
     CATEGORY_FILTER_FILE,
     COMPANY_FILTER_FILE,
+    DEFAULT_CAREER_PAGE_MAPPINGS,
+    DEFAULT_CAREER_TRACKER_FILTER,
     DEFAULT_FILTER_LIST,
     DEFAULT_SERPAPI_LOCATION,
     DEFAULT_SERPAPI_QUERY,
@@ -97,6 +101,41 @@ def save_serpapi_prefs(query: str, location: str) -> None:
     _write_json(SERPAPI_PREFS_FILE, {"query": q, "location": loc})
 
 
+def load_career_page_mappings() -> dict[str, Any]:
+    """Company id → careers list URL and fetcher (see ``DEFAULT_CAREER_PAGE_MAPPINGS``)."""
+    if not CAREER_PAGE_MAPPINGS_FILE.exists():
+        _write_json(CAREER_PAGE_MAPPINGS_FILE, DEFAULT_CAREER_PAGE_MAPPINGS)
+    raw = _read_json(CAREER_PAGE_MAPPINGS_FILE, DEFAULT_CAREER_PAGE_MAPPINGS)
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_CAREER_PAGE_MAPPINGS)
+    comps = raw.get("companies")
+    if not isinstance(comps, list):
+        return dict(DEFAULT_CAREER_PAGE_MAPPINGS)
+    return raw
+
+
+def load_career_tracker_filter() -> list[str]:
+    """Which company IDs are tracked in the Career page tracker tab."""
+    if not CAREER_PAGE_TRACKER_FILTER_FILE.exists():
+        _write_json(CAREER_PAGE_TRACKER_FILTER_FILE, DEFAULT_CAREER_TRACKER_FILTER)
+    raw = _read_json(CAREER_PAGE_TRACKER_FILTER_FILE, DEFAULT_CAREER_TRACKER_FILTER.copy())
+    if not isinstance(raw, list):
+        return list(DEFAULT_CAREER_TRACKER_FILTER)
+    out = [str(x).strip() for x in raw if str(x).strip()]
+    return out or list(DEFAULT_CAREER_TRACKER_FILTER)
+
+
+def save_career_tracker_filter(company_ids: list[str]) -> None:
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for x in company_ids:
+        s = str(x).strip()
+        if s and s not in seen:
+            seen.add(s)
+            cleaned.append(s)
+    _write_json(CAREER_PAGE_TRACKER_FILTER_FILE, cleaned)
+
+
 def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
@@ -104,4 +143,6 @@ def persistence_paths() -> dict[str, Path]:
         "company_filter": COMPANY_FILTER_FILE,
         "category_filter": CATEGORY_FILTER_FILE,
         "serpapi_prefs": SERPAPI_PREFS_FILE,
+        "career_page_mappings": CAREER_PAGE_MAPPINGS_FILE,
+        "career_page_tracker_filter": CAREER_PAGE_TRACKER_FILTER_FILE,
     }

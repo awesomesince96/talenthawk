@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from talenthawk.career_page_tracker import fetch_tracked_career_jobs
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import (
     fetch_jobs_feed,
@@ -23,11 +24,14 @@ from talenthawk.fetch_jobs import (
     matches_text_filter,
 )
 from talenthawk.storage import (
+    load_career_page_mappings,
+    load_career_tracker_filter,
     load_category_filters,
     load_company_filters,
     load_serpapi_prefs,
     load_title_filters,
     persistence_paths,
+    save_career_tracker_filter,
     save_category_filters,
     save_company_filters,
     save_serpapi_prefs,
@@ -137,6 +141,11 @@ def ensure_persistence_defaults() -> None:
         save_company_filters([])
     if not paths["category_filter"].exists():
         save_category_filters([])
+    load_career_page_mappings()
+
+
+def _persist_career_tracker_selection() -> None:
+    save_career_tracker_filter(list(st.session_state.get("career_tracker_selection") or []))
 
 
 def add_company_filter(company: str) -> None:
@@ -384,6 +393,12 @@ def main() -> None:
 
     if "jobs_raw" not in st.session_state:
         st.session_state["jobs_raw"] = []
+    if "career_tracker_selection" not in st.session_state:
+        st.session_state["career_tracker_selection"] = load_career_tracker_filter()
+    if "career_tracker_rows" not in st.session_state:
+        st.session_state["career_tracker_rows"] = []
+    if "career_tracker_errs" not in st.session_state:
+        st.session_state["career_tracker_errs"] = []
 
     title_filters = load_title_filters()
     company_filters = load_company_filters()
@@ -446,6 +461,28 @@ def main() -> None:
 
         render_sidebar_filters(title_filters, company_filters, category_filters)
 
+        st.divider()
+        st.subheader("Career page tracker")
+        _cm = load_career_page_mappings()
+        _ids: list[str] = []
+        _id_label: dict[str, str] = {}
+        for _c in _cm.get("companies", []):
+            if isinstance(_c, dict):
+                _i = str(_c.get("id", "")).strip()
+                if not _i:
+                    continue
+                _ids.append(_i)
+                _id_label[_i] = str(_c.get("display_name", _i)).strip() or _i
+        st.multiselect(
+            "Companies to track",
+            options=_ids,
+            format_func=lambda x: _id_label.get(x, x),
+            key="career_tracker_selection",
+            help="Saved to data/persistence/career_page_tracker_filter.json",
+            on_change=_persist_career_tracker_selection,
+        )
+        st.caption("Open the **Career page tracker** tab and refresh listings there.")
+
     # After sidebar widgets + optional refresh: re-read jobs so the first Refresh click updates the main area
     # in the same run (Streamlit executes top-to-bottom).
     has_fetched_jobs = "jobs_source" in st.session_state
@@ -477,7 +514,7 @@ def main() -> None:
     c5.metric("Hidden (company)", len(excluded_company))
     c6.metric("Hidden (category)", len(excluded_category))
 
-    tab_inc, tab_hidden = st.tabs(["Included jobs", "Hidden jobs"])
+    tab_inc, tab_hidden, tab_career = st.tabs(["Included jobs", "Hidden jobs", "Career page tracker"])
 
     with tab_inc:
         q = st.text_input("Search included jobs (id, title, company, category, pay, source)", "")
@@ -637,6 +674,53 @@ def main() -> None:
         st.markdown("### Hidden by category filter")
         st.caption(f"Rows whose **category** label matches any category-filter rule ({_recency_window_phrase(days_window)}).")
         render_hidden_insights(pd.DataFrame(excluded_category))
+
+    with tab_career:
+        st.caption(
+            "Roles are parsed from each company’s configured **careers list URL** in "
+            "`data/persistence/career_page_mappings.json`. "
+            "Uber’s site is rendered in the browser; listings are fetched via the [Jina Reader](https://jina.ai/reader/) proxy (no API key). "
+            "The reader may return a shortened markdown view (not every open role); use **Link** or the careers URL for the full list."
+        )
+        if st.button("Refresh career listings", type="primary"):
+            sel = list(st.session_state.get("career_tracker_selection") or [])
+            if not sel:
+                st.warning("Select at least one company under **Career page tracker** in the sidebar.")
+            else:
+                with st.spinner("Fetching career pages…"):
+                    jobs, errs = fetch_tracked_career_jobs(sel)
+                st.session_state["career_tracker_rows"] = jobs
+                st.session_state["career_tracker_errs"] = errs
+                if not errs and jobs:
+                    st.success(f"Loaded {len(jobs)} role(s).")
+                elif errs and jobs:
+                    st.success(f"Loaded {len(jobs)} role(s) with warnings.")
+                elif errs:
+                    st.error("Could not load listings; see warnings below.")
+
+        for msg in st.session_state.get("career_tracker_errs") or []:
+            st.warning(msg)
+
+        c_rows = st.session_state.get("career_tracker_rows") or []
+        if c_rows:
+            df_c = pd.DataFrame(c_rows)
+            cols = [c for c in ("title", "company", "job_id", "url", "source") if c in df_c.columns]
+            st.dataframe(
+                df_c[cols],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "url": st.column_config.LinkColumn("Link"),
+                    "title": st.column_config.TextColumn("Title"),
+                    "company": st.column_config.TextColumn("Company"),
+                    "job_id": st.column_config.TextColumn("Job ID"),
+                    "source": st.column_config.TextColumn("Source"),
+                },
+            )
+        elif st.session_state.get("career_tracker_errs"):
+            st.caption("No rows to show.")
+        else:
+            st.info("Select companies in the sidebar and click **Refresh career listings**.")
 
 
 if __name__ == "__main__":

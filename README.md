@@ -20,6 +20,7 @@
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
 - **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
+- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering list). **Refresh career listings** pulls role titles and links via the [Jina Reader](https://jina.ai/reader/) proxy (output can be truncated vs. the live site).
 
 ---
 
@@ -60,6 +61,8 @@ Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 | `company_filter.json` | Lines matched against **company** name. |
 | `category_filter.json` | Lines matched against the **inferred category** label. |
 | `serpapi_prefs.json` | **SerpAPI** search **query** and **location** — loaded on startup, saved when you **Refresh jobs** (local only; not sent to any API until refresh). |
+| `career_page_mappings.json` | **Career page tracker**: company id, display name, careers list URL, and `fetcher` id (see defaults in `talenthawk/settings.py`). |
+| `career_page_tracker_filter.json` | Subset of company ids to load in the **Career page tracker** tab (saved from the sidebar multiselect). |
 
 Empty filter files default to `[]` if missing. `serpapi_prefs.json` appears after the first refresh (or you can create it by hand).
 
@@ -75,8 +78,9 @@ talenthawk/
 ├── talenthawk/
 │   ├── fetch_jobs.py    # fetch + normalize + date window
 │   ├── categorize.py    # title → category (built-in rules)
-│   ├── storage.py       # filter + SerpAPI prefs JSON
-│   └── settings.py      # paths + API URL
+│   ├── storage.py            # filter + SerpAPI + career tracker JSON
+│   ├── career_page_tracker.py # career URL fetchers (e.g. Uber via Jina Reader)
+│   └── settings.py           # paths + API URL + defaults
 └── data/persistence/    # filter JSON (see above)
 ```
 
