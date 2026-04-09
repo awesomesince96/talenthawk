@@ -20,7 +20,7 @@
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
 - **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
-- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering list via Uber’s `loadSearchJobsResults` API, at least **50** roles per refresh).
+- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering via `loadSearchJobsResults`, **USA** locations only, **50** rows sorted by **created** date, **updated** shown when present).
 
 ---
 

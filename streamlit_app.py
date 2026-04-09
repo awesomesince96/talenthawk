@@ -679,7 +679,7 @@ def main() -> None:
         st.caption(
             "Roles come from each company’s configured **careers list URL** and fetcher in "
             "`data/persistence/career_page_mappings.json`. "
-            "**Uber** uses the same `loadSearchJobsResults` API as the careers site (paginated to at least **50** Engineering roles)."
+            "**Uber:** `loadSearchJobsResults`, **USA** primary location only, **50** rows, **newest created first**; **Updated** shows when the API provides it."
         )
         if st.button("Refresh career listings", type="primary"):
             sel = list(st.session_state.get("career_tracker_selection") or [])
@@ -703,7 +703,20 @@ def main() -> None:
         c_rows = st.session_state.get("career_tracker_rows") or []
         if c_rows:
             df_c = pd.DataFrame(c_rows)
-            cols = [c for c in ("title", "company", "job_id", "url", "source") if c in df_c.columns]
+            cols = [
+                c
+                for c in (
+                    "title",
+                    "company",
+                    "job_id",
+                    "salary",
+                    "published_at",
+                    "updated_at",
+                    "url",
+                    "source",
+                )
+                if c in df_c.columns
+            ]
             st.dataframe(
                 df_c[cols],
                 use_container_width=True,
@@ -713,6 +726,9 @@ def main() -> None:
                     "title": st.column_config.TextColumn("Title"),
                     "company": st.column_config.TextColumn("Company"),
                     "job_id": st.column_config.TextColumn("Job ID"),
+                    "salary": st.column_config.TextColumn("Location"),
+                    "published_at": st.column_config.TextColumn("Created"),
+                    "updated_at": st.column_config.TextColumn("Updated"),
                     "source": st.column_config.TextColumn("Source"),
                 },
             )

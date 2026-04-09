@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -13,8 +14,9 @@ UBER_SEARCH_API_URL = "https://www.uber.com/api/loadSearchJobsResults?localeCode
 
 FetcherFn = Callable[[str, str, str, float], list[dict[str, Any]]]
 
-MIN_UBER_JOBS = 50
+TARGET_UBER_USA_JOBS = 50
 UBER_PAGE_SIZE = 50
+UBER_COUNTRY_USA = "USA"
 
 
 def _departments_from_careers_url(careers_list_url: str) -> list[str]:
@@ -35,6 +37,37 @@ def _uber_location_short(loc: object) -> str:
     return " · ".join(parts)[:220]
 
 
+def _uber_country_code(loc: object) -> str:
+    if not isinstance(loc, dict):
+        return ""
+    return str(loc.get("country") or "").strip()
+
+
+def _uber_is_usa_job(j: dict[str, Any]) -> bool:
+    """True if the primary ``location`` is USA (Uber API uses ``country: \"USA\"``)."""
+    loc = j.get("location")
+    if isinstance(loc, dict) and _uber_country_code(loc) == UBER_COUNTRY_USA:
+        return True
+    return False
+
+
+def _parse_uber_iso_dt(value: object) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _normalize_uber_api_job(
     j: dict[str, Any],
     *,
@@ -43,13 +76,15 @@ def _normalize_uber_api_job(
 ) -> dict[str, Any]:
     jid = j.get("id")
     job_id = str(int(jid)) if jid is not None else ""
-    pub = j.get("creationDate") or j.get("updatedDate") or ""
+    created = j.get("creationDate") or ""
+    updated = j.get("updatedDate") or ""
     loc = _uber_location_short(j.get("location"))
     return {
         "job_id": job_id,
         "title": str(j.get("title") or "").strip(),
         "company": company_display,
-        "published_at": str(pub) if pub else "",
+        "published_at": str(created) if created else "",
+        "updated_at": str(updated) if updated else "",
         "url": f"https://www.uber.com/careers/list/{job_id}",
         "salary": loc,
         "source": f"career_page:{company_id}",
@@ -65,8 +100,9 @@ def fetch_via_uber_search_api(
     timeout: float = 90.0,
 ) -> list[dict[str, Any]]:
     """
-    Uber’s job search API (same as the careers site). Requires header ``x-csrf-token: x`` (embedded
-    in their web client). Paginates until at least :data:`MIN_UBER_JOBS` rows or no more results.
+    Uber’s ``loadSearchJobsResults`` API. Paginates until we have enough **USA** rows to return
+    :data:`TARGET_UBER_USA_JOBS` after filtering, or the API is exhausted. Results are sorted by
+    **creation date** (newest first), capped at 50.
     """
     ref = careers_list_url.strip() or "https://www.uber.com/us/en/careers/list/"
     depts = _departments_from_careers_url(careers_list_url)
@@ -81,10 +117,10 @@ def fetch_via_uber_search_api(
         "Referer": ref,
         "x-csrf-token": "x",
     }
-    out: list[dict[str, Any]] = []
+    raw_accum: list[dict[str, Any]] = []
     page = 1
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        while len(out) < MIN_UBER_JOBS:
+        while page <= 80:
             body: dict[str, Any] = {
                 "limit": UBER_PAGE_SIZE,
                 "page": page,
@@ -103,13 +139,23 @@ def fetch_via_uber_search_api(
                 break
             for item in batch:
                 if isinstance(item, dict):
-                    out.append(_normalize_uber_api_job(item, company_display=company_display, company_id=company_id))
+                    raw_accum.append(item)
+            usa_n = sum(1 for j in raw_accum if _uber_is_usa_job(j))
+            if usa_n >= TARGET_UBER_USA_JOBS:
+                break
             if len(batch) < UBER_PAGE_SIZE:
                 break
             page += 1
-            if page > 40:
-                break
-    return out
+
+    usa_only = [j for j in raw_accum if _uber_is_usa_job(j)]
+    min_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+    def _created_sort_key(row: dict[str, Any]) -> datetime:
+        return _parse_uber_iso_dt(row.get("creationDate")) or min_dt
+
+    usa_only.sort(key=_created_sort_key, reverse=True)
+    picked = usa_only[:TARGET_UBER_USA_JOBS]
+    return [_normalize_uber_api_job(j, company_display=company_display, company_id=company_id) for j in picked]
 
 
 FETCHERS: dict[str, FetcherFn] = {
