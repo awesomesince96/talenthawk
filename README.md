@@ -20,7 +20,7 @@
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
 - **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
-- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering via `loadSearchJobsResults`, **USA** locations only, **50** rows sorted by **created** date, **updated** shown when present).
+- **Career page tracker**: choose tracked companies in the sidebar; **`data/mappings/career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering via `loadSearchJobsResults`, **USA** locations only, **50** rows sorted by **created** date, **updated** shown when present).
 
 ---
 
@@ -53,7 +53,9 @@ Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 
 ---
 
-## Persistence (`data/persistence/`)
+## Persistence
+
+**`data/persistence/`** (gitignored — local machine only)
 
 | File | Purpose |
 |------|---------|
@@ -61,10 +63,15 @@ Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 | `company_filter.json` | Lines matched against **company** name. |
 | `category_filter.json` | Lines matched against the **inferred category** label. |
 | `serpapi_prefs.json` | **SerpAPI** search **query** and **location** — loaded on startup, saved when you **Refresh jobs** (local only; not sent to any API until refresh). |
-| `career_page_mappings.json` | **Career page tracker**: company id, display name, careers list URL, and `fetcher` id (see defaults in `talenthawk/settings.py`). |
 | `career_page_tracker_filter.json` | Subset of company ids to load in the **Career page tracker** tab (saved from the sidebar multiselect). |
 
-Empty filter files default to `[]` if missing. `serpapi_prefs.json` appears after the first refresh (or you can create it by hand).
+**`data/mappings/`** (versioned defaults in repo)
+
+| File | Purpose |
+|------|---------|
+| `career_page_mappings.json` | **Career page tracker**: company id, display name, careers list URL, and `fetcher` id (see defaults in `talenthawk/settings.py`). |
+
+Empty filter files default to `[]` if missing. `serpapi_prefs.json` appears after the first refresh (or you can create it by hand). On first run, `career_page_mappings.json` is created from `DEFAULT_CAREER_PAGE_MAPPINGS` in `talenthawk/settings.py` if absent.
 
 ---
 
@@ -81,7 +88,9 @@ talenthawk/
 │   ├── storage.py            # filter + SerpAPI + career tracker JSON
 │   ├── career_page_tracker.py # career fetchers (e.g. Uber search API)
 │   └── settings.py           # paths + API URL + defaults
-└── data/persistence/    # filter JSON (see above)
+└── data/
+    ├── persistence/    # local-only JSON (gitignored; see Persistence)
+    └── mappings/       # career_page_mappings.json (defaults in repo)
 ```
 
 To change how categories are inferred, edit **`DEFAULT_CATEGORY_KEYWORDS`** in `talenthawk/categorize.py`.

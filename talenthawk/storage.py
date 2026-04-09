@@ -16,6 +16,7 @@ from talenthawk.settings import (
     DEFAULT_FILTER_LIST,
     DEFAULT_SERPAPI_LOCATION,
     DEFAULT_SERPAPI_QUERY,
+    MAPPINGS_DIR,
     PERSISTENCE_DIR,
     SERPAPI_PREFS_FILE,
     TITLE_FILTER_FILE,
@@ -103,6 +104,10 @@ def save_serpapi_prefs(query: str, location: str) -> None:
 
 def load_career_page_mappings() -> dict[str, Any]:
     """Company id → careers list URL and fetcher (see ``DEFAULT_CAREER_PAGE_MAPPINGS``)."""
+    legacy = PERSISTENCE_DIR / "career_page_mappings.json"
+    if not CAREER_PAGE_MAPPINGS_FILE.exists() and legacy.exists():
+        _ensure_dir(CAREER_PAGE_MAPPINGS_FILE)
+        CAREER_PAGE_MAPPINGS_FILE.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
     if not CAREER_PAGE_MAPPINGS_FILE.exists():
         _write_json(CAREER_PAGE_MAPPINGS_FILE, DEFAULT_CAREER_PAGE_MAPPINGS)
     raw = _read_json(CAREER_PAGE_MAPPINGS_FILE, DEFAULT_CAREER_PAGE_MAPPINGS)
@@ -139,6 +144,7 @@ def save_career_tracker_filter(company_ids: list[str]) -> None:
 def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
+        "mappings_dir": MAPPINGS_DIR,
         "title_filter": TITLE_FILTER_FILE,
         "company_filter": COMPANY_FILTER_FILE,
         "category_filter": CATEGORY_FILTER_FILE,

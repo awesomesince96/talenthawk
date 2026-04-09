@@ -6,4 +6,5 @@ venv/
 .env
 *.egg-info/
 .DS_Store
-data/persistence/*
+# Local-only JSON (filters, SerpAPI prefs, career tracker selection)
+data/persistence/

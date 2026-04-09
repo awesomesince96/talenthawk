@@ -135,6 +135,7 @@ def _render_top_n_pie(
 def ensure_persistence_defaults() -> None:
     paths = persistence_paths()
     paths["persistence_dir"].mkdir(parents=True, exist_ok=True)
+    paths["mappings_dir"].mkdir(parents=True, exist_ok=True)
     if not paths["title_filter"].exists():
         save_title_filters([])
     if not paths["company_filter"].exists():
@@ -678,7 +679,7 @@ def main() -> None:
     with tab_career:
         st.caption(
             "Roles come from each company’s configured **careers list URL** and fetcher in "
-            "`data/persistence/career_page_mappings.json`. "
+            "`data/mappings/career_page_mappings.json`. "
             "**Uber** (`loadSearchJobsResults`), **Netflix** (Eightfold), **Microsoft** (PCSX): **USA** locations where applicable, up to **50** rows per company, **newest created first**; **Updated** when the API provides it."
         )
         if st.button("Refresh career listings", type="primary"):
@@ -702,36 +703,77 @@ def main() -> None:
 
         c_rows = sort_career_jobs_by_created_desc(st.session_state.get("career_tracker_rows") or [])
         if c_rows:
-            df_c = pd.DataFrame(c_rows)
-            cols = [
-                c
-                for c in (
-                    "title",
-                    "company",
-                    "job_id",
-                    "salary",
-                    "published_at",
-                    "updated_at",
-                    "url",
-                    "source",
-                )
-                if c in df_c.columns
+            visible_career = [
+                r
+                for r in c_rows
+                if job_is_included(r, title_filters, company_filters, category_filters)
             ]
-            st.dataframe(
-                df_c[cols],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "url": st.column_config.LinkColumn("Link"),
-                    "title": st.column_config.TextColumn("Title"),
-                    "company": st.column_config.TextColumn("Company"),
-                    "job_id": st.column_config.TextColumn("Job ID"),
-                    "salary": st.column_config.TextColumn("Location"),
-                    "published_at": st.column_config.TextColumn("Created"),
-                    "updated_at": st.column_config.TextColumn("Updated"),
-                    "source": st.column_config.TextColumn("Source"),
-                },
+            n_c = len(c_rows)
+            n_vis = len(visible_career)
+            if n_vis < n_c:
+                st.caption(f"Showing **{n_vis}** of {n_c} role(s); the rest match a sidebar exclude rule.")
+            st.caption(
+                "The **filter** control next to **Title** adds that text to the **Title** exclude list (same rules as **−** on **Included jobs**); matching roles disappear here and there."
             )
+            if not visible_career:
+                st.info("Every loaded role matches a title / company / category exclude rule. Remove rules in the sidebar **Filters** panel.")
+            else:
+                _ccw = [1.75, 0.32, 1.05, 0.52, 1.05, 0.72, 0.72, 0.42]
+                with st.container(height=520, border=True):
+                    hdr = st.columns(_ccw, vertical_alignment="center")
+                    hdr[0].markdown("**Title**")
+                    hdr[1].markdown("** **")
+                    hdr[2].markdown("**Company**")
+                    hdr[3].markdown("**ID**")
+                    hdr[4].markdown("**Location**")
+                    hdr[5].markdown("**Created**")
+                    hdr[6].markdown("**Updated**")
+                    hdr[7].markdown("**Link**")
+
+                    for pos, row in enumerate(visible_career):
+                        title = str(row.get("title", "") or "")
+                        company = str(row.get("company", "") or "").strip()
+                        job_id = str(row.get("job_id", "") or "").strip()
+                        salary = str(row.get("salary", "") or "").strip()
+                        pub = str(row.get("published_at", "") or "").strip()
+                        upd = str(row.get("updated_at", "") or "").strip()
+                        url = str(row.get("url", "") or "").strip()
+                        row_key = f"career_{pos}"
+
+                        cols = st.columns(_ccw, vertical_alignment="center")
+                        with cols[0]:
+                            st.text(_truncate(title, MAX_TITLE_LEN))
+                        with cols[1]:
+                            t_disabled = not title.strip() or matches_text_filter(title, title_filters)
+                            if st.button(
+                                "",
+                                key=f"ctf_title_{row_key}",
+                                help="Add to Title exclude filter (substring match)",
+                                disabled=t_disabled,
+                                icon=":material/filter_list:",
+                            ):
+                                add_title_filter(title)
+                                st.toast("Title excluded (filter updated)")
+                                st.rerun()
+                        with cols[2]:
+                            st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
+                        with cols[3]:
+                            st.text(job_id if job_id else "—")
+                        with cols[4]:
+                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                        with cols[5]:
+                            st.text(pub if pub else "—")
+                        with cols[6]:
+                            st.text(upd if upd else "—")
+                        with cols[7]:
+                            if url:
+                                safe = html.escape(url, quote=True)
+                                st.markdown(
+                                    f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.caption("—")
         elif st.session_state.get("career_tracker_errs"):
             st.caption("No rows to show.")
         else:

@@ -4,13 +4,14 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 DATA_DIR = PROJECT_ROOT / "data"
 PERSISTENCE_DIR = DATA_DIR / "persistence"
+MAPPINGS_DIR = DATA_DIR / "mappings"
 
 TITLE_FILTER_FILE = PERSISTENCE_DIR / "title_filter.json"
 COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
 CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
 SERPAPI_PREFS_FILE = PERSISTENCE_DIR / "serpapi_prefs.json"
-CAREER_PAGE_MAPPINGS_FILE = PERSISTENCE_DIR / "career_page_mappings.json"
 CAREER_PAGE_TRACKER_FILTER_FILE = PERSISTENCE_DIR / "career_page_tracker_filter.json"
+CAREER_PAGE_MAPPINGS_FILE = MAPPINGS_DIR / "career_page_mappings.json"
 
 REMOTE_JOBS_URL = "https://remotive.com/api/remote-jobs"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search"
