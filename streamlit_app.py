@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from talenthawk.career_page_tracker import fetch_tracked_career_jobs
+from talenthawk.career_page_tracker import fetch_tracked_career_jobs, sort_career_jobs_by_created_desc
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import (
     fetch_jobs_feed,
@@ -700,7 +700,7 @@ def main() -> None:
         for msg in st.session_state.get("career_tracker_errs") or []:
             st.warning(msg)
 
-        c_rows = st.session_state.get("career_tracker_rows") or []
+        c_rows = sort_career_jobs_by_created_desc(st.session_state.get("career_tracker_rows") or [])
         if c_rows:
             df_c = pd.DataFrame(c_rows)
             cols = [

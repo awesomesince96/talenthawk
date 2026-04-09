@@ -73,6 +73,19 @@ def _parse_uber_iso_dt(value: object) -> datetime | None:
     return dt
 
 
+def _normalized_created_sort_key(job: dict[str, Any]) -> datetime:
+    """Parse ``published_at`` for ordering merged career rows (newest first)."""
+    min_dt = datetime.min.replace(tzinfo=timezone.utc)
+    return _parse_uber_iso_dt(job.get("published_at")) or min_dt
+
+
+def sort_career_jobs_by_created_desc(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy sorted by ``published_at`` descending (latest first)."""
+    out = list(jobs)
+    out.sort(key=_normalized_created_sort_key, reverse=True)
+    return out
+
+
 def _unix_ts_to_iso(ts: object) -> str:
     if ts is None:
         return ""
@@ -452,7 +465,8 @@ def fetch_tracked_career_jobs(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     Fetch and merge jobs for each company id. Returns ``(jobs, errors)`` where ``errors`` are
-    human-readable strings per failed company.
+    human-readable strings per failed company. ``jobs`` are sorted by **created** (``published_at``)
+    descending so the newest roles appear first across all selected companies.
     """
     mappings = load_career_page_mappings()
     merged: list[dict[str, Any]] = []
@@ -472,4 +486,4 @@ def fetch_tracked_career_jobs(
             merged.extend(batch)
         except Exception as e:
             errors.append(f"{c}: {e}")
-    return merged, errors
+    return sort_career_jobs_by_created_desc(merged), errors
