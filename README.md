@@ -59,7 +59,8 @@ Then open the app and click **Refresh jobs** in the sidebar to pull listings.
 
 | File | Purpose |
 |------|---------|
-| `title_filter.json` | Lines matched against job **title**; hits are hidden from the main view. |
+| `title_filter.json` | Lines matched against job **title** (rules added with **−** on a row); hits are hidden. |
+| `title_ignore_words.json` | Comma- or newline-separated phrases; if a job **title** contains any phrase (substring, case-insensitive), it is hidden. Edited in the sidebar **Title ignore words** box. |
 | `company_filter.json` | Lines matched against **company** name. |
 | `category_filter.json` | Lines matched against the **inferred category** label. |
 | `serpapi_prefs.json` | **SerpAPI** search **query** and **location** — loaded on startup, saved when you **Refresh jobs** (local only; not sent to any API until refresh). |

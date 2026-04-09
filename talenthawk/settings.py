@@ -7,6 +7,7 @@ PERSISTENCE_DIR = DATA_DIR / "persistence"
 MAPPINGS_DIR = DATA_DIR / "mappings"
 
 TITLE_FILTER_FILE = PERSISTENCE_DIR / "title_filter.json"
+TITLE_IGNORE_WORDS_FILE = PERSISTENCE_DIR / "title_ignore_words.json"
 COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
 CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
 SERPAPI_PREFS_FILE = PERSISTENCE_DIR / "serpapi_prefs.json"

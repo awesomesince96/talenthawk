@@ -22,6 +22,7 @@ from talenthawk.fetch_jobs import (
     fetch_jobs_feed,
     filter_last_n_days,
     matches_text_filter,
+    parse_title_ignore_words_input,
 )
 from talenthawk.storage import (
     load_career_page_mappings,
@@ -30,12 +31,14 @@ from talenthawk.storage import (
     load_company_filters,
     load_serpapi_prefs,
     load_title_filters,
+    load_title_ignore_words,
     persistence_paths,
     save_career_tracker_filter,
     save_category_filters,
     save_company_filters,
     save_serpapi_prefs,
     save_title_filters,
+    save_title_ignore_words,
 )
 
 MAX_TITLE_LEN = 72
@@ -142,6 +145,8 @@ def ensure_persistence_defaults() -> None:
         save_company_filters([])
     if not paths["category_filter"].exists():
         save_category_filters([])
+    if not paths["title_ignore_words"].exists():
+        save_title_ignore_words([])
     load_career_page_mappings()
 
 
@@ -204,8 +209,29 @@ def render_sidebar_filters(
 ) -> None:
     st.header("Filters")
     st.caption(
-        "Substring match, case-insensitive. Press **-** on a row in **Included jobs** to add a rule; **✕** here removes it."
+        "Substring match, case-insensitive. **Title ignore words** = comma/newline keywords; "
+        "on **Jobs API** use **−** on a row for title/company/category rules; **✕** removes a saved rule."
     )
+
+    niw = len(load_title_ignore_words())
+    with st.expander(f"Title ignore words ({niw})", expanded=False):
+        st.caption(
+            "Comma or newline separated. If a job **title** contains any phrase (case-insensitive), it is hidden. "
+            "Saved to `data/persistence/title_ignore_words.json`."
+        )
+        st.text_area(
+            "Words or phrases",
+            key="title_ignore_words_input",
+            height=96,
+            placeholder="e.g. manager, sales, director",
+            label_visibility="visible",
+        )
+        if st.button("Save title ignore words", key="save_title_ignore_words_btn"):
+            words = parse_title_ignore_words_input(str(st.session_state.get("title_ignore_words_input") or ""))
+            save_title_ignore_words(words)
+            st.session_state.pop("title_ignore_words_input", None)
+            st.toast(f"Saved {len(words)} phrase(s).")
+            st.rerun()
 
     nt, nc, ng = len(title_filters), len(company_filters), len(category_filters)
     with st.expander(f"Title ({nt})", expanded=False):
@@ -254,40 +280,6 @@ def render_sidebar_filters(
     with st.expander("Persistence paths"):
         for label, path in persistence_paths().items():
             st.caption(f"{label}: `{path}`")
-
-
-def render_hidden_insights(df_e: pd.DataFrame) -> None:
-    if df_e.empty:
-        st.caption("No listings in this cohort.")
-        return
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("**By category**")
-        cat_counts = df_e.groupby("category").size().reset_index(name="count")
-        fig_cat = px.bar(cat_counts, x="category", y="count", color="category", labels={"count": "Jobs"})
-        fig_cat.update_layout(showlegend=False, xaxis_title=None)
-        st.plotly_chart(fig_cat, use_container_width=True)
-    with col_b:
-        st.markdown("**Top companies**")
-        comp_counts = df_e.groupby("company").size().reset_index(name="count").sort_values("count", ascending=False)
-        top_n = min(25, len(comp_counts))
-        fig_co = px.bar(comp_counts.head(top_n), x="company", y="count", labels={"count": "Jobs"})
-        fig_co.update_layout(xaxis_tickangle=-45, showlegend=False)
-        st.plotly_chart(fig_co, use_container_width=True)
-
-    table = df_e.sort_values("company")
-    if "job_id" not in table.columns:
-        table = table.assign(job_id="")
-    st.dataframe(
-        table[["job_id", "title", "company", "category", "salary", "published_at", "url"]],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "job_id": st.column_config.TextColumn("Job ID"),
-            "url": st.column_config.LinkColumn("Link"),
-            "salary": st.column_config.TextColumn("Pay"),
-        },
-    )
 
 
 def annotate_jobs(jobs: list[dict]) -> list[dict]:
@@ -364,11 +356,14 @@ def job_is_included(
     title_filters: list[str],
     company_filters: list[str],
     category_filters: list[str],
+    title_ignore_words: list[str],
 ) -> bool:
     t = job.get("title") or ""
     c = job.get("company") or ""
     g = job.get("category") or ""
     if matches_text_filter(t, title_filters):
+        return False
+    if matches_text_filter(t, title_ignore_words):
         return False
     if matches_text_filter(c, company_filters):
         return False
@@ -400,89 +395,102 @@ def main() -> None:
         st.session_state["career_tracker_rows"] = []
     if "career_tracker_errs" not in st.session_state:
         st.session_state["career_tracker_errs"] = []
+    if "title_ignore_words_input" not in st.session_state:
+        st.session_state["title_ignore_words_input"] = ", ".join(load_title_ignore_words())
 
     title_filters = load_title_filters()
     company_filters = load_company_filters()
     category_filters = load_category_filters()
 
     with st.sidebar:
-        st.header("Jobs")
-        st.caption("Feeds run only when you click **Refresh jobs** (no auto-fetch on load).")
-        st.selectbox(
-            "Job source",
-            options=["remotive", "serpapi", "both"],
-            format_func=lambda x: {
-                "remotive": "Remotive (free, no API key)",
-                "serpapi": "SerpAPI — Google Jobs",
-                "both": "Remotive + SerpAPI (merged)",
-            }[x],
-            key="jobs_fetch_mode",
-        )
-        st.selectbox(
-            "Posted within",
-            options=list(RECENCY_DAY_CHOICES),
-            format_func=_format_recency_days,
-            key="jobs_recency_days",
-        )
-        st.text_input(
-            "SerpAPI search query (`q`)",
-            key="serpapi_query",
-            help="Stored in data/persistence/serpapi_prefs.json when you Refresh jobs; SerpAPI runs only on refresh.",
-        )
-        st.text_input(
-            "SerpAPI location (optional)",
-            placeholder="e.g. United States",
-            key="serpapi_location",
-            help="Stored locally with the query on Refresh jobs; sent to SerpAPI only when you refresh.",
-        )
-        st.number_input("SerpAPI pages (10 jobs/page, max 5)", min_value=1, max_value=5, step=1, key="serpapi_pages")
-        if st.session_state.get("jobs_fetch_mode") in ("serpapi", "both"):
-            if not _serpapi_key():
-                st.warning("Set **SERPAPI_API_KEY** in the environment or `.streamlit/secrets.toml`.")
-
-        if st.button("Refresh jobs", type="primary"):
-            with st.spinner("Fetching…"):
-                load_jobs_into_session()
-                err = st.session_state.get("jobs_error")
-                n = len(st.session_state.get("jobs_raw") or [])
-                if err:
-                    st.error(err)
-                else:
-                    st.success(f"Loaded {n} listings ({st.session_state.get('jobs_source', '?')}).")
-
-        has_fetched_jobs = "jobs_source" in st.session_state
-        if not has_fetched_jobs:
-            st.caption("**Source:** not loaded yet")
-        else:
-            src = st.session_state.get("jobs_source", "?")
-            st.caption(f"**Source:** {src}")
-        err = st.session_state.get("jobs_error")
-        if err and has_fetched_jobs:
-            st.caption(f"Last fetch error: {err}")
-
+        st.markdown("###### TalentHawk")
         render_sidebar_filters(title_filters, company_filters, category_filters)
 
-        st.divider()
-        st.subheader("Career page tracker")
-        _cm = load_career_page_mappings()
-        _ids: list[str] = []
-        _id_label: dict[str, str] = {}
-        for _c in _cm.get("companies", []):
-            if isinstance(_c, dict):
-                _i = str(_c.get("id", "")).strip()
-                if not _i:
-                    continue
-                _ids.append(_i)
-                _id_label[_i] = str(_c.get("display_name", _i)).strip() or _i
-        st.multiselect(
-            "Companies to track",
-            options=_ids,
-            format_func=lambda x: _id_label.get(x, x),
-            key="career_tracker_selection",
-            help="Saved to data/persistence/career_page_tracker_filter.json",
-            on_change=_persist_career_tracker_selection,
+        view = st.radio(
+            "View",
+            ["Career page tracker", "Jobs API"],
+            key="main_view",
         )
-        st.caption("Open the **Career page tracker** tab and refresh listings there.")
+
+        if view == "Jobs API":
+            st.header("Jobs")
+            st.caption("Feeds run only when you click **Refresh jobs** (no auto-fetch on load).")
+            st.selectbox(
+                "Job source",
+                options=["remotive", "serpapi", "both"],
+                format_func=lambda x: {
+                    "remotive": "Remotive (free, no API key)",
+                    "serpapi": "SerpAPI — Google Jobs",
+                    "both": "Remotive + SerpAPI (merged)",
+                }[x],
+                key="jobs_fetch_mode",
+            )
+            st.selectbox(
+                "Posted within",
+                options=list(RECENCY_DAY_CHOICES),
+                format_func=_format_recency_days,
+                key="jobs_recency_days",
+            )
+            st.text_input(
+                "SerpAPI search query (`q`)",
+                key="serpapi_query",
+                help="Stored in data/persistence/serpapi_prefs.json when you Refresh jobs; SerpAPI runs only on refresh.",
+            )
+            st.text_input(
+                "SerpAPI location (optional)",
+                placeholder="e.g. United States",
+                key="serpapi_location",
+                help="Stored locally with the query on Refresh jobs; sent to SerpAPI only when you refresh.",
+            )
+            st.number_input("SerpAPI pages (10 jobs/page, max 5)", min_value=1, max_value=5, step=1, key="serpapi_pages")
+            if st.session_state.get("jobs_fetch_mode") in ("serpapi", "both"):
+                if not _serpapi_key():
+                    st.warning("Set **SERPAPI_API_KEY** in the environment or `.streamlit/secrets.toml`.")
+
+            if st.button("Refresh jobs", type="primary"):
+                with st.spinner("Fetching…"):
+                    load_jobs_into_session()
+                    err = st.session_state.get("jobs_error")
+                    n = len(st.session_state.get("jobs_raw") or [])
+                    if err:
+                        st.error(err)
+                    else:
+                        st.success(f"Loaded {n} listings ({st.session_state.get('jobs_source', '?')}).")
+
+            has_fetched_jobs = "jobs_source" in st.session_state
+            if not has_fetched_jobs:
+                st.caption("**Source:** not loaded yet")
+            else:
+                src = st.session_state.get("jobs_source", "?")
+                st.caption(f"**Source:** {src}")
+            err = st.session_state.get("jobs_error")
+            if err and has_fetched_jobs:
+                st.caption(f"Last fetch error: {err}")
+
+        elif view == "Career page tracker":
+            st.divider()
+            st.subheader("Career page tracker")
+            _cm = load_career_page_mappings()
+            _ids: list[str] = []
+            _id_label: dict[str, str] = {}
+            for _c in _cm.get("companies", []):
+                if isinstance(_c, dict):
+                    _i = str(_c.get("id", "")).strip()
+                    if not _i:
+                        continue
+                    _ids.append(_i)
+                    _id_label[_i] = str(_c.get("display_name", _i)).strip() or _i
+            st.multiselect(
+                "Companies to track",
+                options=_ids,
+                format_func=lambda x: _id_label.get(x, x),
+                key="career_tracker_selection",
+                help="Saved to data/persistence/career_page_tracker_filter.json",
+                on_change=_persist_career_tracker_selection,
+            )
+            st.caption("Refresh listings in the main area.")
+
+    title_ignore_words = load_title_ignore_words()
 
     # After sidebar widgets + optional refresh: re-read jobs so the first Refresh click updates the main area
     # in the same run (Streamlit executes top-to-bottom).
@@ -494,31 +502,145 @@ def main() -> None:
     windowed = filter_last_n_days(raw, days=days_window)
     annotated = annotate_jobs(windowed)
 
-    included = [j for j in annotated if job_is_included(j, title_filters, company_filters, category_filters)]
+    included = [
+        j
+        for j in annotated
+        if job_is_included(j, title_filters, company_filters, category_filters, title_ignore_words)
+    ]
     excluded_title = [j for j in annotated if matches_text_filter(j["title"], title_filters)]
+    excluded_title_words = [j for j in annotated if matches_text_filter(j["title"], title_ignore_words)]
     excluded_company = [j for j in annotated if matches_text_filter(j["company"], company_filters)]
     excluded_category = [j for j in annotated if matches_text_filter(j["category"], category_filters)]
 
-    st.title("TalentHawk")
-    st.caption(
-        f"Posted within {_recency_window_phrase(days_window)} when a date is known. **Remotive** is free; **SerpAPI** uses [Google Jobs](https://serpapi.com/google-jobs-api) (paid API key). "
-        "Use **-** on a row to add a filter; **✕** in the sidebar removes it."
-    )
-    if not has_fetched_jobs:
-        st.info("Click **Refresh jobs** in the sidebar to fetch from **Remotive** and/or **SerpAPI** (per your job source).")
+    if view == "Career page tracker":
+        st.caption(
+            "Roles come from each company’s configured **careers list URL** and fetcher in "
+            "`data/mappings/career_page_mappings.json`. "
+            "**Uber** (`loadSearchJobsResults`), **Netflix** (Eightfold), **Microsoft** (PCSX): **USA** locations where applicable, up to **50** rows per company, **newest created first**; **Updated** when the API provides it."
+        )
+        if st.button("Refresh career listings", type="primary"):
+            sel = list(st.session_state.get("career_tracker_selection") or [])
+            if not sel:
+                st.warning("Select at least one company under **Career page tracker** in the sidebar.")
+            else:
+                with st.spinner("Fetching career pages…"):
+                    jobs, errs = fetch_tracked_career_jobs(sel)
+                st.session_state["career_tracker_rows"] = jobs
+                st.session_state["career_tracker_errs"] = errs
+                if not errs and jobs:
+                    st.success(f"Loaded {len(jobs)} role(s).")
+                elif errs and jobs:
+                    st.success(f"Loaded {len(jobs)} role(s) with warnings.")
+                elif errs:
+                    st.error("Could not load listings; see warnings below.")
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Fetched (feed)", len(raw))
-    c2.metric(_format_recency_days(days_window), len(windowed))
-    c3.metric("Shown (included)", len(included))
-    c4.metric("Hidden (title)", len(excluded_title))
-    c5.metric("Hidden (company)", len(excluded_company))
-    c6.metric("Hidden (category)", len(excluded_category))
+        for msg in st.session_state.get("career_tracker_errs") or []:
+            st.warning(msg)
 
-    tab_inc, tab_hidden, tab_career = st.tabs(["Included jobs", "Hidden jobs", "Career page tracker"])
+        c_rows = sort_career_jobs_by_created_desc(st.session_state.get("career_tracker_rows") or [])
+        if c_rows:
+            visible_career = [
+                r
+                for r in c_rows
+                if job_is_included(r, title_filters, company_filters, category_filters, title_ignore_words)
+            ]
+            n_c = len(c_rows)
+            n_vis = len(visible_career)
+            if n_vis < n_c:
+                st.caption(f"Showing **{n_vis}** of {n_c} role(s); the rest match a sidebar exclude rule.")
+            st.caption(
+                "The **filter** control next to **Title** adds that text to the **Title** exclude list (same rules as **−** on **Jobs API**); matching roles disappear here and there."
+            )
+            if not visible_career:
+                st.info(
+                    "Every loaded role matches a title rule, **Title ignore words**, or company/category rule. "
+                    "Adjust the sidebar **Title ignore words** and **Filters** panel."
+                )
+            else:
+                _ccw = [1.75, 0.32, 1.05, 0.52, 1.05, 0.72, 0.72, 0.42]
+                with st.container(height=520, border=True):
+                    hdr = st.columns(_ccw, vertical_alignment="center")
+                    hdr[0].markdown("**Title**")
+                    hdr[1].markdown("** **")
+                    hdr[2].markdown("**Company**")
+                    hdr[3].markdown("**ID**")
+                    hdr[4].markdown("**Location**")
+                    hdr[5].markdown("**Created**")
+                    hdr[6].markdown("**Updated**")
+                    hdr[7].markdown("**Link**")
 
-    with tab_inc:
-        q = st.text_input("Search included jobs (id, title, company, category, pay, source)", "")
+                    for pos, row in enumerate(visible_career):
+                        title = str(row.get("title", "") or "")
+                        company = str(row.get("company", "") or "").strip()
+                        job_id = str(row.get("job_id", "") or "").strip()
+                        salary = str(row.get("salary", "") or "").strip()
+                        pub = str(row.get("published_at", "") or "").strip()
+                        upd = str(row.get("updated_at", "") or "").strip()
+                        url = str(row.get("url", "") or "").strip()
+                        row_key = f"career_{pos}"
+
+                        cols = st.columns(_ccw, vertical_alignment="center")
+                        with cols[0]:
+                            st.text(_truncate(title, MAX_TITLE_LEN))
+                        with cols[1]:
+                            t_disabled = (
+                                not title.strip()
+                                or matches_text_filter(title, title_filters)
+                                or matches_text_filter(title, title_ignore_words)
+                            )
+                            if st.button(
+                                "",
+                                key=f"ctf_title_{row_key}",
+                                help="Add to Title exclude filter (substring match)",
+                                disabled=t_disabled,
+                                icon=":material/filter_list:",
+                            ):
+                                add_title_filter(title)
+                                st.toast("Title excluded (filter updated)")
+                                st.rerun()
+                        with cols[2]:
+                            st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
+                        with cols[3]:
+                            st.text(job_id if job_id else "—")
+                        with cols[4]:
+                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                        with cols[5]:
+                            st.text(pub if pub else "—")
+                        with cols[6]:
+                            st.text(upd if upd else "—")
+                        with cols[7]:
+                            if url:
+                                safe = html.escape(url, quote=True)
+                                st.markdown(
+                                    f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.caption("—")
+        elif st.session_state.get("career_tracker_errs"):
+            st.caption("No rows to show.")
+        else:
+            st.info("Select companies in the sidebar and click **Refresh career listings**.")
+
+    elif view == "Jobs API":
+        st.caption(
+            f"**Window:** {_recency_window_phrase(days_window)} (when dated). "
+            "**Remotive** = free · **SerpAPI** = paid. "
+            "**−** = title/company/category rule · sidebar **Title ignore words** = keywords · **✕** removes rules."
+        )
+        if not has_fetched_jobs:
+            st.info("Use **Refresh jobs** in the sidebar (**Remotive** / **SerpAPI** / both).")
+
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+        c1.metric("Fetched (feed)", len(raw))
+        c2.metric(_format_recency_days(days_window), len(windowed))
+        c3.metric("Shown", len(included))
+        c4.metric("Hidden (title rules)", len(excluded_title))
+        c5.metric("Hidden (title words)", len(excluded_title_words))
+        c6.metric("Hidden (company)", len(excluded_company))
+        c7.metric("Hidden (category)", len(excluded_category))
+
+        q = st.text_input("Search Jobs API listings (id, title, company, category, pay, source)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
@@ -575,7 +697,9 @@ def main() -> None:
                         with cols[1]:
                             st.text(_truncate(title, MAX_TITLE_LEN))
                         with cols[2]:
-                            t_disabled = not title or matches_text_filter(title, title_filters)
+                            t_disabled = not title or matches_text_filter(title, title_filters) or matches_text_filter(
+                                title, title_ignore_words
+                            )
                             if st.button(
                                 "-",
                                 key=f"tf_{row_key}",
@@ -628,7 +752,7 @@ def main() -> None:
             else:
                 st.info(f"No jobs in {_recency_window_phrase(days_window)} (or feed is empty).")
 
-        with st.expander("Category distribution (included)", expanded=False):
+        with st.expander("Category distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
                 df_i,
                 "category",
@@ -637,7 +761,7 @@ def main() -> None:
                 other_noun="categories",
                 empty_caption="No categories to chart.",
             )
-        with st.expander("Company distribution (included)", expanded=False):
+        with st.expander("Company distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
                 df_i,
                 "company",
@@ -646,7 +770,7 @@ def main() -> None:
                 other_noun="companies",
                 empty_caption="No companies to chart.",
             )
-        with st.expander("Job title distribution (included)", expanded=False):
+        with st.expander("Job title distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
                 df_i,
                 "title",
@@ -655,129 +779,6 @@ def main() -> None:
                 other_noun="titles",
                 empty_caption="No titles to chart.",
             )
-
-    with tab_hidden:
-        st.subheader("Hidden jobs")
-        st.caption(
-            f"Same time window as **Included jobs** ({_recency_window_phrase(days_window)}). Remove filter rules with **✕** in the left **Filters** panel."
-        )
-
-        st.markdown("### Hidden by title filter")
-        st.caption(f"Rows whose **title** matches any title-filter rule ({_recency_window_phrase(days_window)}).")
-        render_hidden_insights(pd.DataFrame(excluded_title))
-
-        st.divider()
-        st.markdown("### Hidden by company filter")
-        st.caption(f"Rows whose **company** matches any company-filter rule ({_recency_window_phrase(days_window)}).")
-        render_hidden_insights(pd.DataFrame(excluded_company))
-
-        st.divider()
-        st.markdown("### Hidden by category filter")
-        st.caption(f"Rows whose **category** label matches any category-filter rule ({_recency_window_phrase(days_window)}).")
-        render_hidden_insights(pd.DataFrame(excluded_category))
-
-    with tab_career:
-        st.caption(
-            "Roles come from each company’s configured **careers list URL** and fetcher in "
-            "`data/mappings/career_page_mappings.json`. "
-            "**Uber** (`loadSearchJobsResults`), **Netflix** (Eightfold), **Microsoft** (PCSX): **USA** locations where applicable, up to **50** rows per company, **newest created first**; **Updated** when the API provides it."
-        )
-        if st.button("Refresh career listings", type="primary"):
-            sel = list(st.session_state.get("career_tracker_selection") or [])
-            if not sel:
-                st.warning("Select at least one company under **Career page tracker** in the sidebar.")
-            else:
-                with st.spinner("Fetching career pages…"):
-                    jobs, errs = fetch_tracked_career_jobs(sel)
-                st.session_state["career_tracker_rows"] = jobs
-                st.session_state["career_tracker_errs"] = errs
-                if not errs and jobs:
-                    st.success(f"Loaded {len(jobs)} role(s).")
-                elif errs and jobs:
-                    st.success(f"Loaded {len(jobs)} role(s) with warnings.")
-                elif errs:
-                    st.error("Could not load listings; see warnings below.")
-
-        for msg in st.session_state.get("career_tracker_errs") or []:
-            st.warning(msg)
-
-        c_rows = sort_career_jobs_by_created_desc(st.session_state.get("career_tracker_rows") or [])
-        if c_rows:
-            visible_career = [
-                r
-                for r in c_rows
-                if job_is_included(r, title_filters, company_filters, category_filters)
-            ]
-            n_c = len(c_rows)
-            n_vis = len(visible_career)
-            if n_vis < n_c:
-                st.caption(f"Showing **{n_vis}** of {n_c} role(s); the rest match a sidebar exclude rule.")
-            st.caption(
-                "The **filter** control next to **Title** adds that text to the **Title** exclude list (same rules as **−** on **Included jobs**); matching roles disappear here and there."
-            )
-            if not visible_career:
-                st.info("Every loaded role matches a title / company / category exclude rule. Remove rules in the sidebar **Filters** panel.")
-            else:
-                _ccw = [1.75, 0.32, 1.05, 0.52, 1.05, 0.72, 0.72, 0.42]
-                with st.container(height=520, border=True):
-                    hdr = st.columns(_ccw, vertical_alignment="center")
-                    hdr[0].markdown("**Title**")
-                    hdr[1].markdown("** **")
-                    hdr[2].markdown("**Company**")
-                    hdr[3].markdown("**ID**")
-                    hdr[4].markdown("**Location**")
-                    hdr[5].markdown("**Created**")
-                    hdr[6].markdown("**Updated**")
-                    hdr[7].markdown("**Link**")
-
-                    for pos, row in enumerate(visible_career):
-                        title = str(row.get("title", "") or "")
-                        company = str(row.get("company", "") or "").strip()
-                        job_id = str(row.get("job_id", "") or "").strip()
-                        salary = str(row.get("salary", "") or "").strip()
-                        pub = str(row.get("published_at", "") or "").strip()
-                        upd = str(row.get("updated_at", "") or "").strip()
-                        url = str(row.get("url", "") or "").strip()
-                        row_key = f"career_{pos}"
-
-                        cols = st.columns(_ccw, vertical_alignment="center")
-                        with cols[0]:
-                            st.text(_truncate(title, MAX_TITLE_LEN))
-                        with cols[1]:
-                            t_disabled = not title.strip() or matches_text_filter(title, title_filters)
-                            if st.button(
-                                "",
-                                key=f"ctf_title_{row_key}",
-                                help="Add to Title exclude filter (substring match)",
-                                disabled=t_disabled,
-                                icon=":material/filter_list:",
-                            ):
-                                add_title_filter(title)
-                                st.toast("Title excluded (filter updated)")
-                                st.rerun()
-                        with cols[2]:
-                            st.text(_truncate(company, MAX_COMPANY_LEN) if company else "—")
-                        with cols[3]:
-                            st.text(job_id if job_id else "—")
-                        with cols[4]:
-                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
-                        with cols[5]:
-                            st.text(pub if pub else "—")
-                        with cols[6]:
-                            st.text(upd if upd else "—")
-                        with cols[7]:
-                            if url:
-                                safe = html.escape(url, quote=True)
-                                st.markdown(
-                                    f'<a href="{safe}" target="_blank" rel="noopener noreferrer">Open</a>',
-                                    unsafe_allow_html=True,
-                                )
-                            else:
-                                st.caption("—")
-        elif st.session_state.get("career_tracker_errs"):
-            st.caption("No rows to show.")
-        else:
-            st.info("Select companies in the sidebar and click **Refresh career listings**.")
 
 
 if __name__ == "__main__":

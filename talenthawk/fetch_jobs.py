@@ -310,6 +310,25 @@ def filter_last_n_days(jobs: list[dict[str, Any]], days: int = 30) -> list[dict[
     return kept
 
 
+def parse_title_ignore_words_input(text: str) -> list[str]:
+    """
+    Split manual title ignore input on commas and newlines, strip, dedupe (case-insensitive),
+    return sorted unique tokens (same storage shape as other filter lists).
+    """
+    parts = re.split(r"[\n,]+", text or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        s = str(p).strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(s)
+    return sorted(out, key=str.lower)
+
+
 def matches_text_filter(value: str, patterns: list[str]) -> bool:
     """True if ``value`` matches any pattern (case-insensitive): exact, substring either way."""
     c = value.lower().strip()

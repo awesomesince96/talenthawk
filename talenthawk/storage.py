@@ -20,6 +20,7 @@ from talenthawk.settings import (
     PERSISTENCE_DIR,
     SERPAPI_PREFS_FILE,
     TITLE_FILTER_FILE,
+    TITLE_IGNORE_WORDS_FILE,
 )
 
 
@@ -55,6 +56,16 @@ def load_title_filters() -> list[str]:
 def save_title_filters(entries: list[str]) -> None:
     cleaned = sorted({e.strip() for e in entries if e and e.strip()}, key=str.lower)
     _write_json(TITLE_FILTER_FILE, cleaned)
+
+
+def load_title_ignore_words() -> list[str]:
+    raw = _read_json(TITLE_IGNORE_WORDS_FILE, DEFAULT_FILTER_LIST.copy())
+    return _normalize_filter_list(raw)
+
+
+def save_title_ignore_words(entries: list[str]) -> None:
+    cleaned = sorted({e.strip() for e in entries if e and e.strip()}, key=str.lower)
+    _write_json(TITLE_IGNORE_WORDS_FILE, cleaned)
 
 
 def load_company_filters() -> list[str]:
@@ -146,6 +157,7 @@ def persistence_paths() -> dict[str, Path]:
         "persistence_dir": PERSISTENCE_DIR,
         "mappings_dir": MAPPINGS_DIR,
         "title_filter": TITLE_FILTER_FILE,
+        "title_ignore_words": TITLE_IGNORE_WORDS_FILE,
         "company_filter": COMPANY_FILTER_FILE,
         "category_filter": CATEGORY_FILTER_FILE,
         "serpapi_prefs": SERPAPI_PREFS_FILE,
