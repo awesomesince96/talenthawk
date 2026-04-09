@@ -2,77 +2,120 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
 from talenthawk.storage import load_career_page_mappings
 
-JINA_READER_BASE = "https://r.jina.ai/"
-# Markdown links to role detail pages on Uber's careers site.
-_UBER_CAREERS_LIST_LINK = re.compile(
-    r"\[([^\]]+)\]\((https://(?:www\.)?uber\.com[^)]*?/careers/list/(\d+)[^)]*)\)",
-    re.IGNORECASE,
-)
+UBER_SEARCH_API_URL = "https://www.uber.com/api/loadSearchJobsResults?localeCode=en"
 
 FetcherFn = Callable[[str, str, str, float], list[dict[str, Any]]]
 
-
-def _parse_uber_jina_markdown(markdown: str, company_display: str, company_id: str) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for m in _UBER_CAREERS_LIST_LINK.finditer(markdown):
-        title = (m.group(1) or "").strip()
-        url = (m.group(2) or "").strip()
-        jid = (m.group(3) or "").strip()
-        if not title or not url or jid in seen:
-            continue
-        seen.add(jid)
-        out.append(
-            {
-                "job_id": jid,
-                "title": title,
-                "company": company_display,
-                "published_at": "",
-                "url": url,
-                "salary": "",
-                "source": f"career_page:{company_id}",
-                "career_company_id": company_id,
-                "raw": {"link_match": m.group(0)},
-            }
-        )
-    return out
+MIN_UBER_JOBS = 50
+UBER_PAGE_SIZE = 50
 
 
-def fetch_via_jina_markdown_uber(
+def _departments_from_careers_url(careers_list_url: str) -> list[str]:
+    """Reads ``department`` query params from the careers list URL (e.g. ``Engineering``)."""
+    q = parse_qs(urlparse(careers_list_url.strip()).query)
+    raw = q.get("department") or []
+    out = [x.strip() for x in raw if x and str(x).strip()]
+    return out if out else ["Engineering"]
+
+
+def _uber_location_short(loc: object) -> str:
+    if not isinstance(loc, dict):
+        return ""
+    city = str(loc.get("city") or "").strip()
+    region = str(loc.get("region") or "").strip()
+    country = str(loc.get("countryName") or loc.get("country") or "").strip()
+    parts = [p for p in (city, region, country) if p]
+    return " · ".join(parts)[:220]
+
+
+def _normalize_uber_api_job(
+    j: dict[str, Any],
+    *,
+    company_display: str,
+    company_id: str,
+) -> dict[str, Any]:
+    jid = j.get("id")
+    job_id = str(int(jid)) if jid is not None else ""
+    pub = j.get("creationDate") or j.get("updatedDate") or ""
+    loc = _uber_location_short(j.get("location"))
+    return {
+        "job_id": job_id,
+        "title": str(j.get("title") or "").strip(),
+        "company": company_display,
+        "published_at": str(pub) if pub else "",
+        "url": f"https://www.uber.com/careers/list/{job_id}",
+        "salary": loc,
+        "source": f"career_page:{company_id}",
+        "career_company_id": company_id,
+        "raw": j,
+    }
+
+
+def fetch_via_uber_search_api(
     careers_list_url: str,
     company_display: str,
     company_id: str,
-    timeout: float = 120.0,
+    timeout: float = 90.0,
 ) -> list[dict[str, Any]]:
     """
-    Load the public careers HTML via `Jina AI Reader <https://jina.ai/reader/>`_, which returns
-    rendered markdown including role titles and links (Uber's listings are heavily client-rendered).
+    Uber’s job search API (same as the careers site). Requires header ``x-csrf-token: x`` (embedded
+    in their web client). Paginates until at least :data:`MIN_UBER_JOBS` rows or no more results.
     """
-    target = careers_list_url.strip()
-    if not target:
-        return []
-    jina_url = f"{JINA_READER_BASE}{target}"
+    ref = careers_list_url.strip() or "https://www.uber.com/us/en/careers/list/"
+    depts = _departments_from_careers_url(careers_list_url)
     headers = {
-        "User-Agent": "talenthawk-career-tracker/1.0",
-        "Accept": "text/plain",
-        "X-Return-Format": "markdown",
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": "https://www.uber.com",
+        "Referer": ref,
+        "x-csrf-token": "x",
     }
+    out: list[dict[str, Any]] = []
+    page = 1
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        r = client.get(jina_url, headers=headers)
-        r.raise_for_status()
-    text = r.text or ""
-    return _parse_uber_jina_markdown(text, company_display, company_id)
+        while len(out) < MIN_UBER_JOBS:
+            body: dict[str, Any] = {
+                "limit": UBER_PAGE_SIZE,
+                "page": page,
+                "params": {"department": depts},
+            }
+            r = client.post(UBER_SEARCH_API_URL, json=body, headers=headers)
+            r.raise_for_status()
+            payload = r.json()
+            if payload.get("status") != "success":
+                raise RuntimeError(str(payload)[:500])
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                break
+            batch = data.get("results")
+            if not isinstance(batch, list) or not batch:
+                break
+            for item in batch:
+                if isinstance(item, dict):
+                    out.append(_normalize_uber_api_job(item, company_display=company_display, company_id=company_id))
+            if len(batch) < UBER_PAGE_SIZE:
+                break
+            page += 1
+            if page > 40:
+                break
+    return out
 
 
 FETCHERS: dict[str, FetcherFn] = {
-    "jina_markdown_uber": fetch_via_jina_markdown_uber,
+    "uber_search_api": fetch_via_uber_search_api,
+    # Older mappings used the Jina-based fetcher name; resolve to the official API.
+    "jina_markdown_uber": fetch_via_uber_search_api,
 }
 
 
@@ -80,7 +123,7 @@ def fetch_jobs_for_company(
     company_id: str,
     *,
     mappings: dict[str, Any] | None = None,
-    timeout: float = 120.0,
+    timeout: float = 90.0,
 ) -> list[dict[str, Any]]:
     """Return normalized job dicts for one mapped company, or [] if unknown/fetcher missing."""
     data = mappings if mappings is not None else load_career_page_mappings()
@@ -106,7 +149,7 @@ def fetch_jobs_for_company(
 def fetch_tracked_career_jobs(
     company_ids: list[str],
     *,
-    timeout: float = 120.0,
+    timeout: float = 90.0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     Fetch and merge jobs for each company id. Returns ``(jobs, errors)`` where ``errors`` are
@@ -126,7 +169,7 @@ def fetch_tracked_career_jobs(
         try:
             batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
             if not batch:
-                errors.append(f"{c}: no roles parsed (site layout change, timeout, or Jina reader empty)")
+                errors.append(f"{c}: no roles returned (API change or empty results)")
             merged.extend(batch)
         except Exception as e:
             errors.append(f"{c}: {e}")

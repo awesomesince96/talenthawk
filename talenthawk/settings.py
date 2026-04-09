@@ -27,7 +27,7 @@ DEFAULT_CAREER_PAGE_MAPPINGS: dict[str, object] = {
             "id": "uber",
             "display_name": "Uber",
             "careers_list_url": "https://www.uber.com/us/en/careers/list/?department=Engineering",
-            "fetcher": "jina_markdown_uber",
+            "fetcher": "uber_search_api",
         }
     ],
 }

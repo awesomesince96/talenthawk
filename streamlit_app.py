@@ -677,10 +677,9 @@ def main() -> None:
 
     with tab_career:
         st.caption(
-            "Roles are parsed from each company’s configured **careers list URL** in "
+            "Roles come from each company’s configured **careers list URL** and fetcher in "
             "`data/persistence/career_page_mappings.json`. "
-            "Uber’s site is rendered in the browser; listings are fetched via the [Jina Reader](https://jina.ai/reader/) proxy (no API key). "
-            "The reader may return a shortened markdown view (not every open role); use **Link** or the careers URL for the full list."
+            "**Uber** uses the same `loadSearchJobsResults` API as the careers site (paginated to at least **50** Engineering roles)."
         )
         if st.button("Refresh career listings", type="primary"):
             sel = list(st.session_state.get("career_tracker_selection") or [])

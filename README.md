@@ -20,7 +20,7 @@
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **-** on a row to add a rule; **✕** in the left **Filters** panel to remove.
 - **Tabs**: **Included jobs** (table, search, pies) and **Hidden jobs** (charts and tables for excluded rows).
-- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering list). **Refresh career listings** pulls role titles and links via the [Jina Reader](https://jina.ai/reader/) proxy (output can be truncated vs. the live site).
+- **Career page tracker**: choose tracked companies in the sidebar; **`career_page_mappings.json`** maps each company to a careers list URL and fetcher (starts with **Uber** → Engineering list via Uber’s `loadSearchJobsResults` API, at least **50** roles per refresh).
 
 ---
 
@@ -79,7 +79,7 @@ talenthawk/
 │   ├── fetch_jobs.py    # fetch + normalize + date window
 │   ├── categorize.py    # title → category (built-in rules)
 │   ├── storage.py            # filter + SerpAPI + career tracker JSON
-│   ├── career_page_tracker.py # career URL fetchers (e.g. Uber via Jina Reader)
+│   ├── career_page_tracker.py # career fetchers (e.g. Uber search API)
 │   └── settings.py           # paths + API URL + defaults
 └── data/persistence/    # filter JSON (see above)
 ```
