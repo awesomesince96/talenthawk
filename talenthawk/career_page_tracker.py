@@ -11,12 +11,17 @@ import httpx
 from talenthawk.storage import load_career_page_mappings
 
 UBER_SEARCH_API_URL = "https://www.uber.com/api/loadSearchJobsResults?localeCode=en"
+NETFLIX_EIGHTFOLD_JOBS_URL = "https://netflix.eightfold.ai/api/apply/v2/jobs"
+MICROSOFT_PCSX_SEARCH_URL = "https://apply.careers.microsoft.com/api/pcsx/search"
+MICROSOFT_JOB_BASE_URL = "https://apply.careers.microsoft.com"
 
-FetcherFn = Callable[[str, str, str, float], list[dict[str, Any]]]
+FetcherFn = Callable[[dict[str, Any], str, str, float], list[dict[str, Any]]]
 
-TARGET_UBER_USA_JOBS = 50
+TARGET_USA_JOBS = 50
 UBER_PAGE_SIZE = 50
 UBER_COUNTRY_USA = "USA"
+NETFLIX_PAGE_SIZE = 10
+MICROSOFT_PAGE_SIZE = 10
 
 
 def _departments_from_careers_url(careers_list_url: str) -> list[str]:
@@ -68,6 +73,31 @@ def _parse_uber_iso_dt(value: object) -> datetime | None:
     return dt
 
 
+def _unix_ts_to_iso(ts: object) -> str:
+    if ts is None:
+        return ""
+    try:
+        sec = int(float(ts))
+    except (TypeError, ValueError):
+        return ""
+    if sec <= 0:
+        return ""
+    dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _unix_ts_to_dt(ts: object) -> datetime | None:
+    if ts is None:
+        return None
+    try:
+        sec = int(float(ts))
+    except (TypeError, ValueError):
+        return None
+    if sec <= 0:
+        return None
+    return datetime.fromtimestamp(sec, tz=timezone.utc)
+
+
 def _normalize_uber_api_job(
     j: dict[str, Any],
     *,
@@ -94,17 +124,18 @@ def _normalize_uber_api_job(
 
 
 def fetch_via_uber_search_api(
-    careers_list_url: str,
+    entry: dict[str, Any],
     company_display: str,
     company_id: str,
     timeout: float = 90.0,
 ) -> list[dict[str, Any]]:
     """
     Uber’s ``loadSearchJobsResults`` API. Paginates until we have enough **USA** rows to return
-    :data:`TARGET_UBER_USA_JOBS` after filtering, or the API is exhausted. Results are sorted by
+    :data:`TARGET_USA_JOBS` after filtering, or the API is exhausted. Results are sorted by
     **creation date** (newest first), capped at 50.
     """
-    ref = careers_list_url.strip() or "https://www.uber.com/us/en/careers/list/"
+    careers_list_url = str(entry.get("careers_list_url") or "").strip()
+    ref = careers_list_url or "https://www.uber.com/us/en/careers/list/"
     depts = _departments_from_careers_url(careers_list_url)
     headers = {
         "User-Agent": (
@@ -141,7 +172,7 @@ def fetch_via_uber_search_api(
                 if isinstance(item, dict):
                     raw_accum.append(item)
             usa_n = sum(1 for j in raw_accum if _uber_is_usa_job(j))
-            if usa_n >= TARGET_UBER_USA_JOBS:
+            if usa_n >= TARGET_USA_JOBS:
                 break
             if len(batch) < UBER_PAGE_SIZE:
                 break
@@ -154,14 +185,236 @@ def fetch_via_uber_search_api(
         return _parse_uber_iso_dt(row.get("creationDate")) or min_dt
 
     usa_only.sort(key=_created_sort_key, reverse=True)
-    picked = usa_only[:TARGET_UBER_USA_JOBS]
+    picked = usa_only[:TARGET_USA_JOBS]
     return [_normalize_uber_api_job(j, company_display=company_display, company_id=company_id) for j in picked]
+
+
+def _netflix_is_usa(p: dict[str, Any]) -> bool:
+    loc = str(p.get("location") or "")
+    if "United States" in loc or loc.strip().upper().startswith("USA"):
+        return True
+    locs = p.get("locations")
+    if isinstance(locs, list):
+        for x in locs:
+            if isinstance(x, str) and ("United States" in x or x.strip().upper().startswith("USA")):
+                return True
+    return False
+
+
+def _netflix_location_short(p: dict[str, Any]) -> str:
+    loc = str(p.get("location") or "").strip()
+    if loc:
+        return loc[:220]
+    locs = p.get("locations")
+    if isinstance(locs, list):
+        parts = [str(x).strip() for x in locs[:4] if x and str(x).strip()]
+        return " · ".join(parts)[:220]
+    return ""
+
+
+def _normalize_netflix_job(
+    p: dict[str, Any],
+    *,
+    company_display: str,
+    company_id: str,
+) -> dict[str, Any]:
+    jid = p.get("id")
+    job_id = str(jid) if jid is not None else ""
+    url = str(p.get("canonicalPositionUrl") or "").strip()
+    return {
+        "job_id": job_id,
+        "title": str(p.get("name") or "").strip(),
+        "company": company_display,
+        "published_at": _unix_ts_to_iso(p.get("t_create")),
+        "updated_at": _unix_ts_to_iso(p.get("t_update")),
+        "url": url,
+        "salary": _netflix_location_short(p),
+        "source": f"career_page:{company_id}",
+        "career_company_id": company_id,
+        "raw": p,
+    }
+
+
+def fetch_via_eightfold_netflix(
+    entry: dict[str, Any],
+    company_display: str,
+    company_id: str,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
+    """
+    Netflix Eightfold ``apply/v2/jobs``. Paginates with optional ``location`` filter; keeps **USA**
+    rows, sorts by **t_create** (newest first), capped at :data:`TARGET_USA_JOBS`.
+    """
+    loc_filter = str(entry.get("eightfold_location") or "United States").strip()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+    }
+    raw_accum: list[dict[str, Any]] = []
+    total: int | None = None
+    start = 0
+    max_pages = 120
+    page_i = 0
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        while page_i < max_pages:
+            params: dict[str, Any] = {
+                "domain": "netflix.com",
+                "hl": "en",
+                "start": start,
+            }
+            if loc_filter:
+                params["location"] = loc_filter
+            r = client.get(NETFLIX_EIGHTFOLD_JOBS_URL, params=params, headers=headers)
+            r.raise_for_status()
+            payload = r.json()
+            if total is None and isinstance(payload.get("count"), int):
+                total = int(payload["count"])
+            batch = payload.get("positions")
+            if not isinstance(batch, list) or not batch:
+                break
+            for item in batch:
+                if isinstance(item, dict):
+                    raw_accum.append(item)
+            usa_n = sum(1 for j in raw_accum if _netflix_is_usa(j))
+            if usa_n >= TARGET_USA_JOBS:
+                break
+            if len(batch) < NETFLIX_PAGE_SIZE:
+                break
+            if total is not None and start + len(batch) >= total:
+                break
+            start += NETFLIX_PAGE_SIZE
+            page_i += 1
+
+    usa_only = [j for j in raw_accum if _netflix_is_usa(j)]
+    min_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+    def _created_sort_key(row: dict[str, Any]) -> datetime:
+        return _unix_ts_to_dt(row.get("t_create")) or min_dt
+
+    usa_only.sort(key=_created_sort_key, reverse=True)
+    picked = usa_only[:TARGET_USA_JOBS]
+    return [_normalize_netflix_job(p, company_display=company_display, company_id=company_id) for p in picked]
+
+
+def _microsoft_is_usa(p: dict[str, Any]) -> bool:
+    std = p.get("standardizedLocations")
+    if isinstance(std, list):
+        for x in std:
+            if isinstance(x, str) and (x == "US" or x.endswith(", US") or ", US" in x):
+                return True
+    locs = p.get("locations")
+    if isinstance(locs, list):
+        for lo in locs:
+            if isinstance(lo, str) and "United States" in lo:
+                return True
+    return False
+
+
+def _microsoft_location_short(p: dict[str, Any]) -> str:
+    locs = p.get("locations")
+    if isinstance(locs, list) and locs:
+        parts = [str(x).strip() for x in locs[:3] if x and str(x).strip()]
+        return " · ".join(parts)[:220]
+    return ""
+
+
+def _normalize_microsoft_job(
+    p: dict[str, Any],
+    *,
+    company_display: str,
+    company_id: str,
+) -> dict[str, Any]:
+    jid = p.get("id")
+    job_id = str(jid) if jid is not None else ""
+    rel = str(p.get("positionUrl") or "").strip()
+    url = f"{MICROSOFT_JOB_BASE_URL}{rel}" if rel.startswith("/") else rel
+    return {
+        "job_id": job_id,
+        "title": str(p.get("name") or "").strip(),
+        "company": company_display,
+        "published_at": _unix_ts_to_iso(p.get("creationTs")),
+        "updated_at": _unix_ts_to_iso(p.get("postedTs")),
+        "url": url,
+        "salary": _microsoft_location_short(p),
+        "source": f"career_page:{company_id}",
+        "career_company_id": company_id,
+        "raw": p,
+    }
+
+
+def fetch_via_pcsx_microsoft(
+    entry: dict[str, Any],
+    company_display: str,
+    company_id: str,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
+    """
+    Microsoft PCSX search on ``apply.careers.microsoft.com``. Paginates with ``location=United States``;
+    keeps USA rows, sorts by **creationTs** (newest first), capped at :data:`TARGET_USA_JOBS`.
+    """
+    q = str(entry.get("pcsx_query") or "").strip()
+    loc_filter = str(entry.get("pcsx_location") or "United States").strip()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+    }
+    raw_accum: list[dict[str, Any]] = []
+    start = 0
+    max_pages = 200
+    page_i = 0
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        while page_i < max_pages:
+            params: dict[str, Any] = {
+                "domain": "microsoft.com",
+                "query": q,
+                "start": start,
+                "hl": "en",
+            }
+            if loc_filter:
+                params["location"] = loc_filter
+            r = client.get(MICROSOFT_PCSX_SEARCH_URL, params=params, headers=headers)
+            r.raise_for_status()
+            payload = r.json()
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                break
+            batch = data.get("positions")
+            if not isinstance(batch, list) or not batch:
+                break
+            for item in batch:
+                if isinstance(item, dict):
+                    raw_accum.append(item)
+            usa_n = sum(1 for j in raw_accum if _microsoft_is_usa(j))
+            if usa_n >= TARGET_USA_JOBS:
+                break
+            if len(batch) < MICROSOFT_PAGE_SIZE:
+                break
+            start += MICROSOFT_PAGE_SIZE
+            page_i += 1
+
+    usa_only = [j for j in raw_accum if _microsoft_is_usa(j)]
+    min_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+    def _created_sort_key(row: dict[str, Any]) -> datetime:
+        return _unix_ts_to_dt(row.get("creationTs")) or min_dt
+
+    usa_only.sort(key=_created_sort_key, reverse=True)
+    picked = usa_only[:TARGET_USA_JOBS]
+    return [_normalize_microsoft_job(p, company_display=company_display, company_id=company_id) for p in picked]
 
 
 FETCHERS: dict[str, FetcherFn] = {
     "uber_search_api": fetch_via_uber_search_api,
     # Older mappings used the Jina-based fetcher name; resolve to the official API.
     "jina_markdown_uber": fetch_via_uber_search_api,
+    "eightfold_netflix": fetch_via_eightfold_netflix,
+    "pcsx_microsoft": fetch_via_pcsx_microsoft,
 }
 
 
@@ -189,7 +442,7 @@ def fetch_jobs_for_company(
     fn = FETCHERS.get(fetcher)
     if not fn or not url:
         return []
-    return fn(url, display, company_id, timeout)
+    return fn(entry, display, company_id, timeout)
 
 
 def fetch_tracked_career_jobs(

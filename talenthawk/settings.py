@@ -28,7 +28,22 @@ DEFAULT_CAREER_PAGE_MAPPINGS: dict[str, object] = {
             "display_name": "Uber",
             "careers_list_url": "https://www.uber.com/us/en/careers/list/?department=Engineering",
             "fetcher": "uber_search_api",
-        }
+        },
+        {
+            "id": "netflix",
+            "display_name": "Netflix",
+            "careers_list_url": "https://explore.jobs.netflix.net/careers",
+            "fetcher": "eightfold_netflix",
+            "eightfold_location": "United States",
+        },
+        {
+            "id": "microsoft",
+            "display_name": "Microsoft",
+            "careers_list_url": "https://apply.careers.microsoft.com/careers",
+            "fetcher": "pcsx_microsoft",
+            "pcsx_query": "",
+            "pcsx_location": "United States",
+        },
     ],
 }
 
