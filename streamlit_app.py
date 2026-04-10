@@ -715,7 +715,8 @@ def main() -> None:
                     "Adjust the sidebar **Title ignore words** and **Filters** panel."
                 )
             else:
-                _ccw = [1.75, 0.32, 1.05, 0.52, 1.05, 0.72, 0.72, 0.42]
+                # ``salary`` in career rows holds location text from fetchers; optional ``compensation`` if present.
+                _ccw = [1.65, 0.32, 1.0, 0.48, 0.95, 0.72, 0.68, 0.68, 0.42]
                 with st.container(height=MAIN_LIST_HEIGHT_PX, border=True):
                     hdr = st.columns(_ccw, vertical_alignment="center")
                     hdr[0].markdown("**Title**")
@@ -723,15 +724,17 @@ def main() -> None:
                     hdr[2].markdown("**Company**")
                     hdr[3].markdown("**ID**")
                     hdr[4].markdown("**Location**")
-                    hdr[5].markdown("**Created**")
-                    hdr[6].markdown("**Updated**")
-                    hdr[7].markdown("**Link**")
+                    hdr[5].markdown("**Salary**")
+                    hdr[6].markdown("**Created**")
+                    hdr[7].markdown("**Updated**")
+                    hdr[8].markdown("**Link**")
 
                     for pos, row in enumerate(visible_career):
                         title = str(row.get("title", "") or "")
                         company = str(row.get("company", "") or "").strip()
                         job_id = str(row.get("job_id", "") or "").strip()
-                        salary = str(row.get("salary", "") or "").strip()
+                        location = str(row.get("salary", "") or "").strip()
+                        compensation = str(row.get("compensation") or row.get("pay") or "").strip()
                         pub = str(row.get("published_at", "") or "").strip()
                         upd = str(row.get("updated_at", "") or "").strip()
                         url = str(row.get("url", "") or "").strip()
@@ -761,12 +764,14 @@ def main() -> None:
                         with cols[3]:
                             st.text(job_id if job_id else "—")
                         with cols[4]:
-                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                            st.text(_truncate(location, MAX_PAY_LEN) if location else "—")
                         with cols[5]:
-                            st.text(pub if pub else "—")
+                            st.text(_truncate(compensation, MAX_PAY_LEN) if compensation else "—")
                         with cols[6]:
-                            st.text(upd if upd else "—")
+                            st.text(pub if pub else "—")
                         with cols[7]:
+                            st.text(upd if upd else "—")
+                        with cols[8]:
                             if url:
                                 safe = html.escape(url, quote=True)
                                 st.markdown(
@@ -807,7 +812,7 @@ def main() -> None:
         c6.metric("Hidden (company)", len(excluded_company))
         c7.metric("Hidden (category)", len(excluded_category))
 
-        q = st.text_input("Search Jobs API listings (id, title, company, category, pay, source)", "")
+        q = st.text_input("Search Jobs API listings (id, title, company, category, salary, source)", "")
         df_i = pd.DataFrame(included)
         if not df_i.empty:
             if q.strip():
@@ -832,7 +837,7 @@ def main() -> None:
                 st.info("No rows match your search.")
             else:
                 st.caption(
-                    f"{n_show} row{'s' if n_show != 1 else ''} · **−** adds a title / company / category filter · **Pay** / **Open** from the feed"
+                    f"{n_show} row{'s' if n_show != 1 else ''} · **−** adds a title / company / category filter · **Salary** / **Open** from the feed"
                 )
 
                 _colw = [0.52, 1.78, 0.26, 1.12, 0.26, 0.52, 0.26, 0.85, 0.44]
@@ -845,7 +850,7 @@ def main() -> None:
                     hdr[4].markdown("** **")
                     hdr[5].markdown("**Cat**")
                     hdr[6].markdown("** **")
-                    hdr[7].markdown("**Pay**")
+                    hdr[7].markdown("**Salary**")
                     hdr[8].markdown("**Link**")
 
                     for pos in range(n_show):
