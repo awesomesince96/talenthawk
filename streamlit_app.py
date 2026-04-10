@@ -9,7 +9,6 @@ from __future__ import annotations
 import html
 import os
 import re
-from collections import Counter
 
 import pandas as pd
 import plotly.express as px
@@ -50,7 +49,7 @@ MAX_PAY_LEN = 28
 MAX_CATEGORY_LEN = 22
 TITLE_DIST_TOP_N = 25
 TITLE_DIST_CHART_MAX = 56
-TITLE_KEYWORD_HEATMAP_TOP_N = 28
+TITLE_KEYWORD_DIST_TOP_N = 28
 
 MAIN_LIST_HEIGHT_PX = 780
 
@@ -142,43 +141,57 @@ def _tokenize_title_words(title: str, *, min_len: int = 2) -> list[str]:
     return out
 
 
-def _title_word_counts(titles: list[str], *, top_n: int = TITLE_KEYWORD_HEATMAP_TOP_N) -> tuple[list[str], list[int]]:
-    c: Counter[str] = Counter()
+def _word_to_titles_index(titles: list[str]) -> dict[str, list[str]]:
+    """Map each token to the list of job titles that contain it (each title at most once per word)."""
+    idx: dict[str, list[str]] = {}
     for t in titles:
+        seen: set[str] = set()
         for w in _tokenize_title_words(t):
-            c[w] += 1
-    if not c:
-        return [], []
-    most = c.most_common(top_n)
-    words = [w for w, _ in most]
-    counts = [n for _, n in most]
-    return words, counts
+            if w in seen:
+                continue
+            seen.add(w)
+            idx.setdefault(w, []).append(t)
+    return idx
 
 
-def _render_title_keyword_heatmap(titles: list[str], *, subheader: str = "Title keyword heatmap") -> None:
-    """Single-row heatmap of word counts across job titles (visible rows)."""
+def _render_title_keyword_distribution(titles: list[str], *, subheader: str = "Title keyword distribution") -> None:
+    """Horizontal bar chart of how many titles contain each word; hover lists those titles."""
     st.subheader(subheader)
-    st.caption("Word counts from **Title** (tokenized; common filler words omitted). Matches the table above.")
-    words, counts = _title_word_counts(titles)
-    if not words:
+    st.caption(
+        "Each bar = number of **titles** that contain the word (tokenized; common filler omitted). "
+        "Hover a bar for the full list. Matches the table above."
+    )
+    idx = _word_to_titles_index([t for t in titles if (t or "").strip()])
+    if not idx:
         st.caption("No title words to chart.")
         return
-    z = [counts]
+    ranked = sorted(idx.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:TITLE_KEYWORD_DIST_TOP_N]
+    # Plotly draws first y category at the bottom — reverse so the most common word is at the top.
+    ranked_bar = list(reversed(ranked))
+    words_y = [w for w, _ in ranked_bar]
+    cnts = [len(idx[w]) for w in words_y]
+    hover_bodies = ["<br>".join(html.escape(t) for t in idx[w]) for w in words_y]
+
     fig = go.Figure(
-        data=go.Heatmap(
-            z=z,
-            x=words,
-            y=["count"],
-            colorscale="Viridis",
-            showscale=True,
-            hovertemplate="%{x}<br>count: %{z}<extra></extra>",
+        data=go.Bar(
+            x=cnts,
+            y=words_y,
+            orientation="h",
+            customdata=hover_bodies,
+            marker=dict(color=cnts, colorscale="Viridis", showscale=False),
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "<b>%{x}</b> title(s)<br><br>"
+                "%{customdata}<extra></extra>"
+            ),
         )
     )
     fig.update_layout(
-        height=240,
-        margin=dict(l=8, r=8, t=8, b=96),
-        xaxis=dict(side="bottom", tickangle=-40, tickfont=dict(size=11)),
-        yaxis=dict(showticklabels=False, title=""),
+        height=max(300, min(900, 36 * len(words_y) + 120)),
+        margin=dict(l=8, r=8, t=12, b=48),
+        xaxis_title="Titles containing word",
+        yaxis=dict(title=""),
+        showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -745,7 +758,7 @@ def main() -> None:
                                 )
                             else:
                                 st.caption("—")
-                _render_title_keyword_heatmap(
+                _render_title_keyword_distribution(
                     [str(r.get("title", "") or "") for r in visible_career],
                 )
         elif st.session_state.get("career_tracker_errs"):
@@ -877,7 +890,7 @@ def main() -> None:
                                 )
                             else:
                                 st.caption("—")
-                _render_title_keyword_heatmap(list(df_show["title"].fillna("").astype(str)))
+                _render_title_keyword_distribution(list(df_show["title"].fillna("").astype(str)))
         else:
             if not has_fetched_jobs:
                 st.caption("Load listings with **Refresh jobs** in the sidebar.")
