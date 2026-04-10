@@ -141,27 +141,42 @@ def _tokenize_title_words(title: str, *, min_len: int = 2) -> list[str]:
     return out
 
 
-def _word_to_titles_index(titles: list[str]) -> dict[str, list[str]]:
-    """Map each token to the list of job titles that contain it (each title at most once per word)."""
-    idx: dict[str, list[str]] = {}
-    for t in titles:
+def _word_to_company_title_index(rows: list[tuple[str, str]]) -> dict[str, list[tuple[str, str]]]:
+    """Map each token to (company, title) rows whose **title** contains it (one row per word at most)."""
+    idx: dict[str, list[tuple[str, str]]] = {}
+    for company, title in rows:
+        if not (title or "").strip():
+            continue
+        co = (company or "").strip() or "—"
+        ti = title.strip()
+        row = (co, ti)
         seen: set[str] = set()
-        for w in _tokenize_title_words(t):
+        for w in _tokenize_title_words(title):
             if w in seen:
                 continue
             seen.add(w)
-            idx.setdefault(w, []).append(t)
+            idx.setdefault(w, []).append(row)
     return idx
 
 
-def _render_title_keyword_distribution(titles: list[str], *, subheader: str = "Title keyword distribution") -> None:
-    """Horizontal bar chart of how many titles contain each word; hover lists those titles."""
+def _hover_company_title_line(company: str, title: str) -> str:
+    co = (company or "").strip() or "—"
+    ti = (title or "").strip() or "—"
+    return f"Company: {html.escape(co)}, Title: {html.escape(ti)}"
+
+
+def _render_title_keyword_distribution(
+    company_title_rows: list[tuple[str, str]],
+    *,
+    subheader: str = "Title keyword distribution",
+) -> None:
+    """Horizontal bar chart of how many rows contain each word in the title; hover lists company + title."""
     st.subheader(subheader)
     st.caption(
-        "Each bar = number of **titles** that contain the word (tokenized; common filler omitted). "
-        "Hover a bar for the full list. Matches the table above."
+        "Each bar = rows whose **Title** contains the word (tokenized; common filler omitted). "
+        "Hover a bar for **Company** and **Title** per row. Matches the table above."
     )
-    idx = _word_to_titles_index([t for t in titles if (t or "").strip()])
+    idx = _word_to_company_title_index(company_title_rows)
     if not idx:
         st.caption("No title words to chart.")
         return
@@ -170,7 +185,9 @@ def _render_title_keyword_distribution(titles: list[str], *, subheader: str = "T
     ranked_bar = list(reversed(ranked))
     words_y = [w for w, _ in ranked_bar]
     cnts = [len(idx[w]) for w in words_y]
-    hover_bodies = ["<br>".join(html.escape(t) for t in idx[w]) for w in words_y]
+    hover_bodies = [
+        "<br>".join(_hover_company_title_line(co, ti) for co, ti in idx[w]) for w in words_y
+    ]
 
     fig = go.Figure(
         data=go.Bar(
@@ -181,7 +198,7 @@ def _render_title_keyword_distribution(titles: list[str], *, subheader: str = "T
             marker=dict(color=cnts, colorscale="Viridis", showscale=False),
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "<b>%{x}</b> title(s)<br><br>"
+                "<b>%{x}</b> row(s)<br><br>"
                 "%{customdata}<extra></extra>"
             ),
         )
@@ -189,7 +206,7 @@ def _render_title_keyword_distribution(titles: list[str], *, subheader: str = "T
     fig.update_layout(
         height=max(300, min(900, 36 * len(words_y) + 120)),
         margin=dict(l=8, r=8, t=12, b=48),
-        xaxis_title="Titles containing word",
+        xaxis_title="Rows (title contains word)",
         yaxis=dict(title=""),
         showlegend=False,
     )
@@ -759,7 +776,13 @@ def main() -> None:
                             else:
                                 st.caption("—")
                 _render_title_keyword_distribution(
-                    [str(r.get("title", "") or "") for r in visible_career],
+                    [
+                        (
+                            str(r.get("company", "") or "").strip() or "—",
+                            str(r.get("title", "") or ""),
+                        )
+                        for r in visible_career
+                    ],
                 )
         elif st.session_state.get("career_tracker_errs"):
             st.caption("No rows to show.")
@@ -890,7 +913,16 @@ def main() -> None:
                                 )
                             else:
                                 st.caption("—")
-                _render_title_keyword_distribution(list(df_show["title"].fillna("").astype(str)))
+                _render_title_keyword_distribution(
+                    [
+                        (str(c).strip() or "—", str(t))
+                        for c, t in zip(
+                            df_show["company"].fillna("").astype(str),
+                            df_show["title"].fillna("").astype(str),
+                            strict=True,
+                        )
+                    ],
+                )
         else:
             if not has_fetched_jobs:
                 st.caption("Load listings with **Refresh jobs** in the sidebar.")
