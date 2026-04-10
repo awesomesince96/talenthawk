@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import html
 import os
+import re
+from collections import Counter
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -47,6 +50,64 @@ MAX_PAY_LEN = 28
 MAX_CATEGORY_LEN = 22
 TITLE_DIST_TOP_N = 25
 TITLE_DIST_CHART_MAX = 56
+TITLE_KEYWORD_HEATMAP_TOP_N = 28
+
+MAIN_LIST_HEIGHT_PX = 780
+
+TITLE_KEYWORD_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        "is",
+        "it",
+        "be",
+        "are",
+        "was",
+        "were",
+        "been",
+        "being",
+        "this",
+        "that",
+        "these",
+        "those",
+        "our",
+        "your",
+        "we",
+        "you",
+        "all",
+        "any",
+        "no",
+        "not",
+        "ii",
+        "iii",
+        "iv",
+        "v",
+        "remote",
+        "usa",
+        "us",
+        "uk",
+        "ea",
+        "emea",
+        "apac",
+        "latam",
+    }
+)
+
+_WORD_TOKEN_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?", re.I)
 
 RECENCY_DAY_CHOICES = (1, 3, 7, 14, 30)
 
@@ -69,6 +130,57 @@ def _truncate(text: str, max_len: int) -> str:
     if len(t) <= max_len:
         return t
     return t[: max_len - 1] + "…"
+
+
+def _tokenize_title_words(title: str, *, min_len: int = 2) -> list[str]:
+    """Lowercase alphanumeric tokens from a job title; skips very short tokens."""
+    out: list[str] = []
+    for m in _WORD_TOKEN_RE.finditer(title or ""):
+        w = m.group(0).lower()
+        if len(w) >= min_len and w not in TITLE_KEYWORD_STOPWORDS:
+            out.append(w)
+    return out
+
+
+def _title_word_counts(titles: list[str], *, top_n: int = TITLE_KEYWORD_HEATMAP_TOP_N) -> tuple[list[str], list[int]]:
+    c: Counter[str] = Counter()
+    for t in titles:
+        for w in _tokenize_title_words(t):
+            c[w] += 1
+    if not c:
+        return [], []
+    most = c.most_common(top_n)
+    words = [w for w, _ in most]
+    counts = [n for _, n in most]
+    return words, counts
+
+
+def _render_title_keyword_heatmap(titles: list[str], *, subheader: str = "Title keyword heatmap") -> None:
+    """Single-row heatmap of word counts across job titles (visible rows)."""
+    st.subheader(subheader)
+    st.caption("Word counts from **Title** (tokenized; common filler words omitted). Matches the table above.")
+    words, counts = _title_word_counts(titles)
+    if not words:
+        st.caption("No title words to chart.")
+        return
+    z = [counts]
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=words,
+            y=["count"],
+            colorscale="Viridis",
+            showscale=True,
+            hovertemplate="%{x}<br>count: %{z}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=240,
+        margin=dict(l=8, r=8, t=8, b=96),
+        xaxis=dict(side="bottom", tickangle=-40, tickfont=dict(size=11)),
+        yaxis=dict(showticklabels=False, title=""),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_top_n_pie(
@@ -374,6 +486,22 @@ def job_is_included(
 
 def main() -> None:
     st.set_page_config(page_title="TalentHawk", layout="wide")
+    st.markdown(
+        """
+        <style>
+        .main .block-container {
+            padding-top: 0.65rem !important;
+            padding-bottom: 0.65rem !important;
+            max-width: 100%;
+        }
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     ensure_persistence_defaults()
 
     if "jobs_fetch_mode" not in st.session_state:
@@ -558,7 +686,7 @@ def main() -> None:
                 )
             else:
                 _ccw = [1.75, 0.32, 1.05, 0.52, 1.05, 0.72, 0.72, 0.42]
-                with st.container(height=520, border=True):
+                with st.container(height=MAIN_LIST_HEIGHT_PX, border=True):
                     hdr = st.columns(_ccw, vertical_alignment="center")
                     hdr[0].markdown("**Title**")
                     hdr[1].markdown("** **")
@@ -617,6 +745,9 @@ def main() -> None:
                                 )
                             else:
                                 st.caption("—")
+                _render_title_keyword_heatmap(
+                    [str(r.get("title", "") or "") for r in visible_career],
+                )
         elif st.session_state.get("career_tracker_errs"):
             st.caption("No rows to show.")
         else:
@@ -669,7 +800,7 @@ def main() -> None:
                 )
 
                 _colw = [0.52, 1.78, 0.26, 1.12, 0.26, 0.52, 0.26, 0.85, 0.44]
-                with st.container(height=520, border=True):
+                with st.container(height=MAIN_LIST_HEIGHT_PX, border=True):
                     hdr = st.columns(_colw, vertical_alignment="center")
                     hdr[0].markdown("**Job ID**")
                     hdr[1].markdown("**Title**")
@@ -746,6 +877,7 @@ def main() -> None:
                                 )
                             else:
                                 st.caption("—")
+                _render_title_keyword_heatmap(list(df_show["title"].fillna("").astype(str)))
         else:
             if not has_fetched_jobs:
                 st.caption("Load listings with **Refresh jobs** in the sidebar.")
