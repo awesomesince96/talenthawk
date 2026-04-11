@@ -34,22 +34,20 @@
       "display_name": "Google",
       "careers_list_url": "https://www.google.com/about/careers/applications/jobs/results",
       "fetcher": "serpapi_careers",
-      "serpapi_query": "software engineer",
+      "serpapi_query": "Google software engineer",
       "serpapi_location": "United States",
-      "serpapi_max_pages": 3,
-      "serpapi_url_substring": "google.com/about/careers",
-      "serpapi_company_substring": "google"
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "google, youtube"
     },
     {
       "id": "meta",
       "display_name": "Meta",
       "careers_list_url": "https://www.metacareers.com/jobsearch",
       "fetcher": "serpapi_careers",
-      "serpapi_query": "software engineer",
+      "serpapi_query": "Meta software engineer",
       "serpapi_location": "United States",
-      "serpapi_max_pages": 3,
-      "serpapi_url_substring": "metacareers.com",
-      "serpapi_company_substring": "meta"
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "meta, facebook"
     }
   ]
 }

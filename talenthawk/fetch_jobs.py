@@ -188,6 +188,7 @@ def fetch_serpapi_google_jobs(
     gl: str = "us",
     max_pages: int = 3,
     timeout: float = 60.0,
+    chips: str | None = None,
 ) -> list[dict[str, Any]]:
     """Google Jobs via `SerpAPI <https://serpapi.com/google-jobs-api>`_. Requires a paid SerpAPI key."""
     if not api_key or not api_key.strip():
@@ -208,6 +209,9 @@ def fetch_serpapi_google_jobs(
             }
             if location and location.strip():
                 params["location"] = location.strip()
+            ch = (chips or "").strip()
+            if ch:
+                params["chips"] = ch
             if token:
                 params["next_page_token"] = token
             r = client.get(SERPAPI_SEARCH_URL, params=params)

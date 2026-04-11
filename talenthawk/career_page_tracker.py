@@ -519,27 +519,111 @@ def fetch_via_amazon_jobs(
     return picked
 
 
-def _serpapi_key_from_env() -> str:
+def _serpapi_key_resolved() -> str:
+    """Same sources as the Streamlit app: env vars, then ``st.secrets`` when running inside Streamlit."""
     for k in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
         v = os.environ.get(k, "").strip()
         if v:
             return v
+    try:
+        import streamlit as st
+
+        sec = st.secrets.get("SERPAPI_API_KEY", "")
+        if sec and str(sec).strip():
+            return str(sec).strip()
+    except (FileNotFoundError, KeyError, AttributeError, RuntimeError, ImportError, ModuleNotFoundError):
+        pass
     return ""
 
 
+def _split_serpapi_needles(value: object) -> list[str]:
+    """Comma-separated substrings, lowercased (e.g. ``meta, facebook``)."""
+    if value is None:
+        return []
+    return [x.strip().lower() for x in str(value).split(",") if x.strip()]
+
+
+def _serpapi_url_haystack(j: dict[str, Any]) -> str:
+    """All apply links + share link — the first option is often Indeed/LinkedIn, not the employer site."""
+    parts: list[str] = [str(j.get("url") or "")]
+    raw = j.get("raw")
+    if isinstance(raw, dict):
+        opts = raw.get("apply_options")
+        if isinstance(opts, list):
+            for o in opts:
+                if isinstance(o, dict):
+                    parts.append(str(o.get("link") or ""))
+        parts.append(str(raw.get("share_link") or ""))
+    return " ".join(parts).lower()
+
+
+def _serpapi_company_blob(j: dict[str, Any]) -> str:
+    """Employer name as shown on the card (often correct even when apply URL is a third party)."""
+    parts: list[str] = [str(j.get("company") or "")]
+    raw = j.get("raw")
+    if isinstance(raw, dict):
+        parts.append(str(raw.get("company_name") or ""))
+        parts.append(str(raw.get("via") or ""))
+    return " ".join(parts).lower()
+
+
 def _serpapi_row_matches_filters(entry: dict[str, Any], j: dict[str, Any]) -> bool:
-    """Optional URL and/or company substring (case-insensitive); match if any provided needle hits."""
-    url = (j.get("url") or "").lower()
-    comp = (j.get("company") or "").lower()
-    un = str(entry.get("serpapi_url_substring") or "").strip().lower()
-    cn = str(entry.get("serpapi_company_substring") or "").strip().lower()
-    if not un and not cn:
+    """
+    Keep a row if URL needles hit **any** apply link, and/or company needles hit employer fields
+    (``company_name`` often matches even when the first apply link is Indeed/LinkedIn).
+    If both needle lists are set, either match wins (OR).
+    """
+    url_needles = _split_serpapi_needles(entry.get("serpapi_url_substring"))
+    comp_needles = _split_serpapi_needles(entry.get("serpapi_company_substring"))
+    if not url_needles and not comp_needles:
         return True
-    if un and un in url:
-        return True
-    if cn and cn in comp:
-        return True
-    return False
+    url_hay = _serpapi_url_haystack(j)
+    comp_blob = _serpapi_company_blob(j)
+    ok_url = any(n in url_hay for n in url_needles)
+    ok_comp = any(n in comp_blob for n in comp_needles)
+    if url_needles and comp_needles:
+        return ok_url or ok_comp
+    if url_needles:
+        return ok_url
+    return ok_comp
+
+
+def _pick_serpapi_apply_url(j: dict[str, Any], entry: dict[str, Any]) -> str:
+    """Prefer a careers-site link over the first aggregator apply option."""
+    raw = j.get("raw")
+    if not isinstance(raw, dict):
+        return str(j.get("url") or "").strip()
+    candidates: list[str] = []
+    opts = raw.get("apply_options")
+    if isinstance(opts, list):
+        for o in opts:
+            if isinstance(o, dict):
+                link = str(o.get("link") or "").strip()
+                if link:
+                    candidates.append(link)
+    share = str(raw.get("share_link") or "").strip()
+    if share:
+        candidates.append(share)
+    hints = _split_serpapi_needles(entry.get("serpapi_url_substring")) + _split_serpapi_needles(
+        entry.get("serpapi_company_substring")
+    )
+    for c in candidates:
+        cl = c.lower()
+        if any(h and len(h) > 2 and h in cl for h in hints):
+            return c
+    for c in candidates:
+        cl = c.lower()
+        if any(
+            x in cl
+            for x in (
+                "metacareers.com",
+                "facebook.com/careers",
+                "careers.google",
+                "google.com/about/careers",
+            )
+        ):
+            return c
+    return str(j.get("url") or "").strip() or (candidates[0] if candidates else "")
 
 
 def fetch_via_serpapi_careers(
@@ -552,7 +636,7 @@ def fetch_via_serpapi_careers(
     Google Jobs (SerpAPI) with URL/company filters so rows map to one employer’s site
     (e.g. ``careers.google`` / ``metacareers.com``). Requires ``SERPAPI_API_KEY``.
     """
-    key = _serpapi_key_from_env()
+    key = _serpapi_key_resolved()
     if not key:
         raise RuntimeError(
             "Set SERPAPI_API_KEY in the environment (same key as **Jobs API** → SerpAPI) "
@@ -562,7 +646,15 @@ def fetch_via_serpapi_careers(
     loc = str(entry.get("serpapi_location") or "").strip() or None
     pages = int(entry.get("serpapi_max_pages") or 3)
     pages = max(1, min(5, pages))
-    raw_jobs = fetch_serpapi_google_jobs(key, q, location=loc, max_pages=pages, timeout=timeout)
+    chips = str(entry.get("serpapi_chips") or "").strip() or None
+    raw_jobs = fetch_serpapi_google_jobs(
+        key,
+        q,
+        location=loc,
+        max_pages=pages,
+        timeout=timeout,
+        chips=chips,
+    )
     out: list[dict[str, Any]] = []
     for j in raw_jobs:
         if not isinstance(j, dict):
@@ -570,13 +662,14 @@ def fetch_via_serpapi_careers(
         if not _serpapi_row_matches_filters(entry, j):
             continue
         serp = j.get("raw")
+        apply_url = _pick_serpapi_apply_url(j, entry)
         row = {
             "job_id": str(j.get("job_id") or "").strip(),
             "title": str(j.get("title") or "").strip(),
             "company": company_display,
             "published_at": str(j.get("published_at") or "").strip(),
             "updated_at": "",
-            "url": str(j.get("url") or "").strip(),
+            "url": apply_url,
             "salary": str(j.get("salary") or "").strip(),
             "source": f"career_page:{company_id}",
             "career_company_id": company_id,
