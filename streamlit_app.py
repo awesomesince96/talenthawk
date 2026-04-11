@@ -674,7 +674,8 @@ def main() -> None:
         st.caption(
             "Roles come from each company’s configured **careers list URL** and fetcher in "
             "`data/mappings/career_page_mappings.json`. "
-            "**Uber** (`loadSearchJobsResults`), **Netflix** (Eightfold), **Microsoft** (PCSX): **USA** locations where applicable, up to **50** rows per company, **newest created first**; **Updated** when the API provides it."
+            "**Uber** (search API), **Netflix** (Eightfold), **Microsoft** (PCSX), **Amazon** (`amazon.jobs` JSON): **USA** where applicable, up to **50** rows per company. "
+            "**Google** and **Meta** use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**), filtered to each company’s careers domain. **Newest first** where dates exist; **Updated** when the source provides it."
         )
         if st.button("Refresh career listings", type="primary"):
             sel = list(st.session_state.get("career_tracker_selection") or [])

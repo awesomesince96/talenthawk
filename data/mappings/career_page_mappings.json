@@ -21,6 +21,35 @@
       "fetcher": "pcsx_microsoft",
       "pcsx_query": "",
       "pcsx_location": "United States"
+    },
+    {
+      "id": "amazon",
+      "display_name": "Amazon",
+      "careers_list_url": "https://www.amazon.jobs/en/search",
+      "fetcher": "amazon_jobs",
+      "amazon_location": "United States"
+    },
+    {
+      "id": "google",
+      "display_name": "Google",
+      "careers_list_url": "https://www.google.com/about/careers/applications/jobs/results",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 3,
+      "serpapi_url_substring": "google.com/about/careers",
+      "serpapi_company_substring": "google"
+    },
+    {
+      "id": "meta",
+      "display_name": "Meta",
+      "careers_list_url": "https://www.metacareers.com/jobsearch",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 3,
+      "serpapi_url_substring": "metacareers.com",
+      "serpapi_company_substring": "meta"
     }
   ]
 }

@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from talenthawk.fetch_jobs import fetch_serpapi_google_jobs
 from talenthawk.storage import load_career_page_mappings
 
 UBER_SEARCH_API_URL = "https://www.uber.com/api/loadSearchJobsResults?localeCode=en"
 NETFLIX_EIGHTFOLD_JOBS_URL = "https://netflix.eightfold.ai/api/apply/v2/jobs"
 MICROSOFT_PCSX_SEARCH_URL = "https://apply.careers.microsoft.com/api/pcsx/search"
 MICROSOFT_JOB_BASE_URL = "https://apply.careers.microsoft.com"
+AMAZON_JOBS_SEARCH_URL = "https://www.amazon.jobs/en/search"
 
 FetcherFn = Callable[[dict[str, Any], str, str, float], list[dict[str, Any]]]
 
@@ -422,12 +425,177 @@ def fetch_via_pcsx_microsoft(
     return [_normalize_microsoft_job(p, company_display=company_display, company_id=company_id) for p in picked]
 
 
+def _parse_amazon_posted_date(s: str) -> str:
+    """Parse strings like ``April 11, 2026`` from Amazon search JSON."""
+    t = (s or "").strip()
+    if not t:
+        return ""
+    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+        try:
+            dt = datetime.strptime(t, fmt).replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _normalize_amazon_job(
+    j: dict[str, Any],
+    *,
+    company_display: str,
+    company_id: str,
+) -> dict[str, Any]:
+    job_path = str(j.get("job_path") or "").strip()
+    job_id = str(j.get("id_icims") or j.get("id") or "").strip()
+    title = str(j.get("title") or "").strip()
+    loc = str(j.get("normalized_location") or j.get("location") or "").strip()
+    if job_path.startswith("/"):
+        url = f"https://www.amazon.jobs{job_path}"
+    elif job_path.startswith("http"):
+        url = job_path
+    else:
+        url = ""
+    posted = _parse_amazon_posted_date(str(j.get("posted_date") or ""))
+    upd = str(j.get("updated_time") or "").strip()
+    return {
+        "job_id": job_id,
+        "title": title,
+        "company": company_display,
+        "published_at": posted,
+        "updated_at": upd,
+        "url": url,
+        "salary": loc,
+        "source": f"career_page:{company_id}",
+        "career_company_id": company_id,
+        "raw": j,
+    }
+
+
+def fetch_via_amazon_jobs(
+    entry: dict[str, Any],
+    company_display: str,
+    company_id: str,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
+    """Public ``amazon.jobs`` JSON search (USA); no API key."""
+    loc_filter = str(entry.get("amazon_location") or "United States").strip() or "United States"
+    page_size = 10
+    picked: list[dict[str, Any]] = []
+    offset = 0
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+    }
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        while len(picked) < TARGET_USA_JOBS and offset < 8000:
+            params: dict[str, str] = {
+                "offset": str(offset),
+                "result_limit": str(page_size),
+                "sort": "recent",
+                "base_query": "",
+                "loc_query": loc_filter,
+            }
+            r = client.get(AMAZON_JOBS_SEARCH_URL, params=params, headers=headers)
+            r.raise_for_status()
+            payload = r.json()
+            jobs = payload.get("jobs") if isinstance(payload, dict) else None
+            if not isinstance(jobs, list) or not jobs:
+                break
+            for j in jobs:
+                if not isinstance(j, dict):
+                    continue
+                cc = str(j.get("country_code") or "").strip().upper()
+                if cc not in ("USA", "US"):
+                    continue
+                picked.append(_normalize_amazon_job(j, company_display=company_display, company_id=company_id))
+                if len(picked) >= TARGET_USA_JOBS:
+                    break
+            offset += page_size
+            if len(jobs) < page_size:
+                break
+    return picked
+
+
+def _serpapi_key_from_env() -> str:
+    for k in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
+        v = os.environ.get(k, "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _serpapi_row_matches_filters(entry: dict[str, Any], j: dict[str, Any]) -> bool:
+    """Optional URL and/or company substring (case-insensitive); match if any provided needle hits."""
+    url = (j.get("url") or "").lower()
+    comp = (j.get("company") or "").lower()
+    un = str(entry.get("serpapi_url_substring") or "").strip().lower()
+    cn = str(entry.get("serpapi_company_substring") or "").strip().lower()
+    if not un and not cn:
+        return True
+    if un and un in url:
+        return True
+    if cn and cn in comp:
+        return True
+    return False
+
+
+def fetch_via_serpapi_careers(
+    entry: dict[str, Any],
+    company_display: str,
+    company_id: str,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
+    """
+    Google Jobs (SerpAPI) with URL/company filters so rows map to one employer’s site
+    (e.g. ``careers.google`` / ``metacareers.com``). Requires ``SERPAPI_API_KEY``.
+    """
+    key = _serpapi_key_from_env()
+    if not key:
+        raise RuntimeError(
+            "Set SERPAPI_API_KEY in the environment (same key as **Jobs API** → SerpAPI) "
+            "to load this company."
+        )
+    q = str(entry.get("serpapi_query") or "software engineer").strip() or "software engineer"
+    loc = str(entry.get("serpapi_location") or "").strip() or None
+    pages = int(entry.get("serpapi_max_pages") or 3)
+    pages = max(1, min(5, pages))
+    raw_jobs = fetch_serpapi_google_jobs(key, q, location=loc, max_pages=pages, timeout=timeout)
+    out: list[dict[str, Any]] = []
+    for j in raw_jobs:
+        if not isinstance(j, dict):
+            continue
+        if not _serpapi_row_matches_filters(entry, j):
+            continue
+        serp = j.get("raw")
+        row = {
+            "job_id": str(j.get("job_id") or "").strip(),
+            "title": str(j.get("title") or "").strip(),
+            "company": company_display,
+            "published_at": str(j.get("published_at") or "").strip(),
+            "updated_at": "",
+            "url": str(j.get("url") or "").strip(),
+            "salary": str(j.get("salary") or "").strip(),
+            "source": f"career_page:{company_id}",
+            "career_company_id": company_id,
+            "raw": serp if isinstance(serp, dict) else j,
+        }
+        out.append(row)
+        if len(out) >= TARGET_USA_JOBS:
+            break
+    return out
+
+
 FETCHERS: dict[str, FetcherFn] = {
     "uber_search_api": fetch_via_uber_search_api,
     # Older mappings used the Jina-based fetcher name; resolve to the official API.
     "jina_markdown_uber": fetch_via_uber_search_api,
     "eightfold_netflix": fetch_via_eightfold_netflix,
     "pcsx_microsoft": fetch_via_pcsx_microsoft,
+    "amazon_jobs": fetch_via_amazon_jobs,
+    "serpapi_careers": fetch_via_serpapi_careers,
 }
 
 

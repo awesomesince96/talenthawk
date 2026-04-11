@@ -222,7 +222,9 @@ def fetch_serpapi_google_jobs(
             if isinstance(batch, list):
                 for item in batch:
                     if isinstance(item, dict):
-                        out.append(_normalize_serpapi_job(item))
+                        norm = _normalize_serpapi_job(item)
+                        norm["raw"] = item
+                        out.append(norm)
             pag = data.get("serpapi_pagination")
             token = None
             if isinstance(pag, dict):
