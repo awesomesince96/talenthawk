@@ -19,6 +19,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from talenthawk.career_page_tracker import fetch_tracked_career_jobs, sort_career_jobs_by_created_desc
+from talenthawk.job_cache import (
+    DEFAULT_TTL_SECONDS,
+    ensure_jobs_cache_dirs,
+    feed_cache_fingerprint,
+    try_restore_jobs_session_from_feed_cache,
+    write_jobs_feed_cache,
+)
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import (
     fetch_jobs_feed,
@@ -281,6 +288,7 @@ def ensure_persistence_defaults() -> None:
     paths = persistence_paths()
     paths["persistence_dir"].mkdir(parents=True, exist_ok=True)
     paths["mappings_dir"].mkdir(parents=True, exist_ok=True)
+    ensure_jobs_cache_dirs()
     if not paths["title_filter"].exists():
         save_title_filters([])
     if not paths["company_filter"].exists():
@@ -463,14 +471,59 @@ def _serpapi_key() -> str | None:
     return None
 
 
+def _try_hydrate_jobs_from_disk_cache() -> bool:
+    """Fill ``jobs_raw`` / ``jobs_source`` from ``data/jobs/feed/`` when TTL allows."""
+    mode = str(st.session_state.get("jobs_fetch_mode", "remotive"))
+    if mode not in ("remotive", "serpapi", "both"):
+        mode = "remotive"
+    q = (st.session_state.get("serpapi_query") or "software engineer").strip()
+    loc_s = (st.session_state.get("serpapi_location") or "").strip()
+    pages = int(st.session_state.get("serpapi_pages", 3) or 3)
+    pages = max(1, min(5, pages))
+    got = try_restore_jobs_session_from_feed_cache(
+        mode=mode,
+        serpapi_query=q,
+        serpapi_location=loc_s,
+        serpapi_max_pages=pages,
+        ttl_seconds=DEFAULT_TTL_SECONDS,
+    )
+    if got is None:
+        return False
+    jobs, label = got
+    st.session_state["jobs_raw"] = jobs
+    st.session_state["jobs_source"] = f"{label} (cached ≤{DEFAULT_TTL_SECONDS // 3600}h)"
+    st.session_state.pop("jobs_error", None)
+    return True
+
+
 def load_jobs_into_session() -> None:
     mode = str(st.session_state.get("jobs_fetch_mode", "remotive"))
     if mode not in ("remotive", "serpapi", "both"):
         mode = "remotive"
     q = (st.session_state.get("serpapi_query") or "software engineer").strip()
     loc = (st.session_state.get("serpapi_location") or "").strip() or None
+    loc_s = (st.session_state.get("serpapi_location") or "").strip()
     pages = int(st.session_state.get("serpapi_pages", 3) or 3)
     pages = max(1, min(5, pages))
+    bypass = bool(st.session_state.get("jobs_ignore_cache", False))
+    if not bypass:
+        got = try_restore_jobs_session_from_feed_cache(
+            mode=mode,
+            serpapi_query=q,
+            serpapi_location=loc_s,
+            serpapi_max_pages=pages,
+            ttl_seconds=DEFAULT_TTL_SECONDS,
+        )
+        if got is not None:
+            jobs, label = got
+            st.session_state["jobs_raw"] = jobs
+            st.session_state["jobs_source"] = f"{label} (cached ≤{DEFAULT_TTL_SECONDS // 3600}h)"
+            st.session_state.pop("jobs_error", None)
+            save_serpapi_prefs(
+                str(st.session_state.get("serpapi_query") or ""),
+                str(st.session_state.get("serpapi_location") or ""),
+            )
+            return
     try:
         jobs, label = fetch_jobs_feed(
             mode,
@@ -482,6 +535,16 @@ def load_jobs_into_session() -> None:
         st.session_state["jobs_raw"] = jobs
         st.session_state["jobs_source"] = label
         st.session_state.pop("jobs_error", None)
+        fp = feed_cache_fingerprint(mode, q, loc_s, pages)
+        write_jobs_feed_cache(
+            fp,
+            jobs,
+            source_label=label,
+            mode=mode,
+            serpapi_query=q,
+            serpapi_location=loc_s,
+            serpapi_max_pages=pages,
+        )
     except Exception as e:
         st.session_state["jobs_raw"] = []
         st.session_state["jobs_source"] = "none"
@@ -572,7 +635,10 @@ def main() -> None:
 
         if view == "Jobs API":
             st.header("Jobs")
-            st.caption("Feeds run only when you click **Refresh jobs** (no auto-fetch on load).")
+            st.caption(
+                "Click **Refresh jobs** to load listings. Uses **data/jobs/feed/** cache when fresh "
+                f"(≤{DEFAULT_TTL_SECONDS // 3600}h) unless **Fetch live** is checked."
+            )
             st.selectbox(
                 "Job source",
                 options=["remotive", "serpapi", "both"],
@@ -605,8 +671,14 @@ def main() -> None:
                 if not _serpapi_key():
                     st.warning("Set **SERPAPI_API_KEY** in the environment or `.streamlit/secrets.toml`.")
 
+            st.checkbox(
+                "Fetch live (bypass cache)",
+                value=False,
+                key="jobs_ignore_cache",
+                help=f"When unchecked, Refresh uses data/jobs/feed for this source/query if still fresh ({DEFAULT_TTL_SECONDS // 3600}h). Check to always call Remotive/SerpAPI.",
+            )
             if st.button("Refresh jobs", type="primary"):
-                with st.spinner("Fetching…"):
+                with st.spinner("Loading…"):
                     load_jobs_into_session()
                     err = st.session_state.get("jobs_error")
                     n = len(st.session_state.get("jobs_raw") or [])
@@ -646,9 +718,34 @@ def main() -> None:
                 help="Saved to data/persistence/career_page_tracker_filter.json",
                 on_change=_persist_career_tracker_selection,
             )
-            st.caption("Refresh listings in the main area.")
+            st.checkbox(
+                "Fetch live (bypass cache)",
+                value=False,
+                key="career_ignore_cache",
+                help=f"When unchecked, Refresh uses data/jobs/career per company if still fresh ({DEFAULT_TTL_SECONDS // 3600}h). Check to always hit each careers API.",
+            )
+            st.caption("Refresh listings in the main area (cache-first unless **Fetch live** is on).")
 
     title_ignore_words = load_title_ignore_words()
+
+    # Restore from ``data/jobs/`` when session lists are empty (no network for career; optional disk read for Jobs API).
+    if view == "Jobs API" and not (st.session_state.get("jobs_raw") or []):
+        _try_hydrate_jobs_from_disk_cache()
+    if view == "Career page tracker":
+        _career_sel = list(st.session_state.get("career_tracker_selection") or [])
+        if _career_sel and not (st.session_state.get("career_tracker_rows") or []):
+            _cj, _ce, _cn = fetch_tracked_career_jobs(
+                _career_sel,
+                force_refresh=False,
+                use_cache=True,
+                allow_network=False,
+            )
+            if _cj:
+                st.session_state["career_tracker_rows"] = _cj
+                st.session_state["career_tracker_errs"] = _ce
+                st.session_state["career_cache_notes"] = _cn
+            elif _ce:
+                st.session_state["career_tracker_errs"] = _ce
 
     # After sidebar widgets + optional refresh: re-read jobs so the first Refresh click updates the main area
     # in the same run (Streamlit executes top-to-bottom).
@@ -675,26 +772,37 @@ def main() -> None:
             "Roles come from each company’s configured **careers list URL** and fetcher in "
             "`data/mappings/career_page_mappings.json`. "
             "**Uber** (search API), **Netflix** (Eightfold), **Microsoft** (PCSX), **Amazon** (`amazon.jobs` JSON): **USA** where applicable, up to **50** rows per company. "
-            "**Google** and **Meta** use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**), filtered to each company’s careers domain. **Newest first** where dates exist; **Updated** when the source provides it."
+            "**Google** and **Meta** use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**), filtered to each company’s careers domain. **Newest first** where dates exist; **Updated** when the source provides it. "
+            f"**Refresh** prefers **data/jobs/career/** when fresh (≤{DEFAULT_TTL_SECONDS // 3600}h); enable **Fetch live** to bypass."
         )
         if st.button("Refresh career listings", type="primary"):
             sel = list(st.session_state.get("career_tracker_selection") or [])
             if not sel:
                 st.warning("Select at least one company under **Career page tracker** in the sidebar.")
             else:
-                with st.spinner("Fetching career pages…"):
-                    jobs, errs = fetch_tracked_career_jobs(sel)
+                _bypass = bool(st.session_state.get("career_ignore_cache", False))
+                with st.spinner("Fetching career pages…" if _bypass else "Loading career listings…"):
+                    jobs, errs, notes = fetch_tracked_career_jobs(
+                        sel,
+                        force_refresh=_bypass,
+                        use_cache=not _bypass,
+                    )
                 st.session_state["career_tracker_rows"] = jobs
                 st.session_state["career_tracker_errs"] = errs
+                st.session_state["career_cache_notes"] = notes
                 if not errs and jobs:
-                    st.success(f"Loaded {len(jobs)} role(s).")
+                    st.success(f"Loaded {len(jobs)} role(s). {' · '.join(notes)}")
                 elif errs and jobs:
-                    st.success(f"Loaded {len(jobs)} role(s) with warnings.")
+                    st.success(f"Loaded {len(jobs)} role(s) with warnings. {' · '.join(notes)}")
                 elif errs:
                     st.error("Could not load listings; see warnings below.")
 
         for msg in st.session_state.get("career_tracker_errs") or []:
             st.warning(msg)
+
+        _cc_notes = st.session_state.get("career_cache_notes") or []
+        if _cc_notes:
+            st.caption("Load info: " + " · ".join(str(x) for x in _cc_notes))
 
         c_rows = sort_career_jobs_by_created_desc(st.session_state.get("career_tracker_rows") or [])
         if c_rows:

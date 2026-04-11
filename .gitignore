@@ -8,3 +8,5 @@ venv/
 .DS_Store
 # Local-only JSON (filters, SerpAPI prefs, career tracker selection)
 data/persistence/
+# Cached job snapshots (per company / feed fingerprint)
+data/jobs/

@@ -10,6 +10,12 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from talenthawk.fetch_jobs import fetch_serpapi_google_jobs
+from talenthawk.job_cache import (
+    DEFAULT_TTL_SECONDS,
+    career_entry_fingerprint,
+    read_career_company_cache,
+    write_career_company_cache,
+)
 from talenthawk.storage import load_career_page_mappings
 
 UBER_SEARCH_API_URL = "https://www.uber.com/api/loadSearchJobsResults?localeCode=en"
@@ -692,6 +698,23 @@ FETCHERS: dict[str, FetcherFn] = {
 }
 
 
+def mapping_entry_for_company(
+    company_id: str,
+    *,
+    mappings: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Single company block from ``career_page_mappings.json``."""
+    data = mappings if mappings is not None else load_career_page_mappings()
+    companies = data.get("companies") if isinstance(data, dict) else None
+    if not isinstance(companies, list):
+        return None
+    cid = str(company_id).strip()
+    for c in companies:
+        if isinstance(c, dict) and str(c.get("id", "")).strip() == cid:
+            return c
+    return None
+
+
 def fetch_jobs_for_company(
     company_id: str,
     *,
@@ -699,15 +722,7 @@ def fetch_jobs_for_company(
     timeout: float = 90.0,
 ) -> list[dict[str, Any]]:
     """Return normalized job dicts for one mapped company, or [] if unknown/fetcher missing."""
-    data = mappings if mappings is not None else load_career_page_mappings()
-    companies = data.get("companies") if isinstance(data, dict) else None
-    if not isinstance(companies, list):
-        return []
-    entry: dict[str, Any] | None = None
-    for c in companies:
-        if isinstance(c, dict) and str(c.get("id", "")).strip() == company_id:
-            entry = c
-            break
+    entry = mapping_entry_for_company(company_id, mappings=mappings)
     if not entry:
         return []
     fetcher = str(entry.get("fetcher") or "").strip()
@@ -723,15 +738,26 @@ def fetch_tracked_career_jobs(
     company_ids: list[str],
     *,
     timeout: float = 90.0,
-) -> tuple[list[dict[str, Any]], list[str]]:
+    force_refresh: bool = False,
+    use_cache: bool = True,
+    allow_network: bool = True,
+    cache_ttl_seconds: int = DEFAULT_TTL_SECONDS,
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """
-    Fetch and merge jobs for each company id. Returns ``(jobs, errors)`` where ``errors`` are
-    human-readable strings per failed company. ``jobs`` are sorted by **created** (``published_at``)
-    descending so the newest roles appear first across all selected companies.
+    Fetch and merge jobs for each company id.
+
+    With ``use_cache`` and not ``force_refresh``, loads per-company files under
+    ``data/jobs/career/`` when fresh (TTL) and mapping fingerprint matches.
+
+    ``allow_network=False`` skips HTTP when the cache misses (for silent session restore).
+
+    Returns ``(jobs, errors, cache_notes)`` where ``cache_notes`` are short lines like
+    ``uber (cache)`` or ``google (fetch)``.
     """
     mappings = load_career_page_mappings()
     merged: list[dict[str, Any]] = []
     errors: list[str] = []
+    notes: list[str] = []
     valid_ids = {str(c.get("id", "")).strip() for c in mappings.get("companies", []) if isinstance(c, dict)}
     for cid in company_ids:
         c = str(cid).strip()
@@ -740,11 +766,36 @@ def fetch_tracked_career_jobs(
         if c not in valid_ids:
             errors.append(f"{c}: not in career_page_mappings.json")
             continue
+        entry = mapping_entry_for_company(c, mappings=mappings)
+        if not entry:
+            errors.append(f"{c}: not in career_page_mappings.json")
+            continue
+        fp = career_entry_fingerprint(entry)
+        label = str(entry.get("display_name") or c).strip() or c
+
+        if use_cache and not force_refresh:
+            cached = read_career_company_cache(c, expected_fingerprint=fp, ttl_seconds=cache_ttl_seconds)
+            if cached is not None:
+                merged.extend(cached)
+                notes.append(f"{label} (cache)")
+                continue
+
+        if not allow_network:
+            continue
+
         try:
             batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
             if not batch:
                 errors.append(f"{c}: no roles returned (API change or empty results)")
-            merged.extend(batch)
+            else:
+                merged.extend(batch)
+                write_career_company_cache(
+                    c,
+                    batch,
+                    config_fingerprint=fp,
+                    source=str(batch[0].get("source") or "career_page") if batch else "career_page",
+                )
+                notes.append(f"{label} (fetch)")
         except Exception as e:
             errors.append(f"{c}: {e}")
-    return sort_career_jobs_by_created_desc(merged), errors
+    return sort_career_jobs_by_created_desc(merged), errors, notes
