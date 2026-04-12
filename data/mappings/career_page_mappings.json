@@ -128,6 +128,66 @@
       "serpapi_location": "United States",
       "serpapi_max_pages": 5,
       "serpapi_company_substring": "samsara"
+    },
+    {
+      "id": "coupang",
+      "display_name": "Coupang",
+      "careers_list_url": "https://www.coupang.jobs/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Coupang software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "coupang"
+    },
+    {
+      "id": "stubhub",
+      "display_name": "StubHub",
+      "careers_list_url": "https://careers.stubhub.com/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "StubHub software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "stubhub"
+    },
+    {
+      "id": "roblox",
+      "display_name": "Roblox",
+      "careers_list_url": "https://careers.roblox.com/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Roblox software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "roblox"
+    },
+    {
+      "id": "airtable",
+      "display_name": "Airtable",
+      "careers_list_url": "https://airtable.com/careers",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Airtable software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "airtable"
+    },
+    {
+      "id": "twitch",
+      "display_name": "Twitch",
+      "careers_list_url": "https://www.twitch.tv/jobs",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Twitch software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "twitch"
+    },
+    {
+      "id": "linkedin",
+      "display_name": "LinkedIn",
+      "careers_list_url": "https://careers.linkedin.com/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "LinkedIn software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "linkedin"
     }
   ]
 }

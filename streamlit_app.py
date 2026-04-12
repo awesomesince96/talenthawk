@@ -775,7 +775,7 @@ def main() -> None:
             "Roles come from each company’s configured **careers list URL** and fetcher in "
             "`data/mappings/career_page_mappings.json`. "
             "**Uber** (search API), **Netflix** (Eightfold), **Microsoft** (PCSX), **Amazon** (`amazon.jobs` JSON): **USA** where applicable, up to **50** rows per company. "
-            "Additional employers (e.g. **Google**, **Meta**, **Databricks**, **OpenAI**, **Notion**, **Anthropic**, **Broadcom**, **Citadel**, **Jane Street**, **Samsara**) use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**), filtered by company name / apply URL. **Newest first** where dates exist; **Updated** when the source provides it. "
+            "Many more employers in the multiselect use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**); see `data/mappings/career_page_mappings.json`. Filtered by company name / apply URL. **Newest first** where dates exist; **Updated** when the source provides it. "
             f"**Refresh** prefers **data/jobs/career/** when fresh (≤{DEFAULT_TTL_SECONDS // 3600}h); enable **Fetch live** to bypass. "
             "**Salary** uses explicit pay fields when present; otherwise a range is parsed from description text (e.g. Amazon qualifications)."
         )
