@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from talenthawk.career_page_tracker import fetch_tracked_career_jobs, sort_career_jobs_by_created_desc
+from talenthawk.salary_parse import salary_display_for_api_job, salary_display_for_career_row
 from talenthawk.job_cache import (
     DEFAULT_TTL_SECONDS,
     ensure_jobs_cache_dirs,
@@ -53,6 +54,7 @@ from talenthawk.storage import (
 MAX_TITLE_LEN = 72
 MAX_COMPANY_LEN = 36
 MAX_PAY_LEN = 28
+MAX_SALARY_DISPLAY_LEN = 48
 MAX_CATEGORY_LEN = 22
 TITLE_DIST_TOP_N = 25
 TITLE_DIST_CHART_MAX = 56
@@ -453,6 +455,7 @@ def annotate_jobs(jobs: list[dict]) -> list[dict]:
             "title": title,
             "salary": salary if salary else "",
         }
+        row["salary"] = salary_display_for_api_job(row)
         out.append(row)
     return out
 
@@ -773,7 +776,8 @@ def main() -> None:
             "`data/mappings/career_page_mappings.json`. "
             "**Uber** (search API), **Netflix** (Eightfold), **Microsoft** (PCSX), **Amazon** (`amazon.jobs` JSON): **USA** where applicable, up to **50** rows per company. "
             "**Google** and **Meta** use **SerpAPI** (same `SERPAPI_API_KEY` as **Jobs API**), filtered to each company’s careers domain. **Newest first** where dates exist; **Updated** when the source provides it. "
-            f"**Refresh** prefers **data/jobs/career/** when fresh (≤{DEFAULT_TTL_SECONDS // 3600}h); enable **Fetch live** to bypass."
+            f"**Refresh** prefers **data/jobs/career/** when fresh (≤{DEFAULT_TTL_SECONDS // 3600}h); enable **Fetch live** to bypass. "
+            "**Salary** uses explicit pay fields when present; otherwise a range is parsed from description text (e.g. Amazon qualifications)."
         )
         if st.button("Refresh career listings", type="primary"):
             sel = list(st.session_state.get("career_tracker_selection") or [])
@@ -843,7 +847,7 @@ def main() -> None:
                         company = str(row.get("company", "") or "").strip()
                         job_id = str(row.get("job_id", "") or "").strip()
                         location = str(row.get("salary", "") or "").strip()
-                        compensation = str(row.get("compensation") or row.get("pay") or "").strip()
+                        compensation = salary_display_for_career_row(row)
                         pub = str(row.get("published_at", "") or "").strip()
                         upd = str(row.get("updated_at", "") or "").strip()
                         url = str(row.get("url", "") or "").strip()
@@ -875,7 +879,7 @@ def main() -> None:
                         with cols[4]:
                             st.text(_truncate(location, MAX_PAY_LEN) if location else "—")
                         with cols[5]:
-                            st.text(_truncate(compensation, MAX_PAY_LEN) if compensation else "—")
+                            st.text(_truncate(compensation, MAX_SALARY_DISPLAY_LEN) if compensation else "—")
                         with cols[6]:
                             st.text(pub if pub else "—")
                         with cols[7]:
@@ -907,7 +911,8 @@ def main() -> None:
         st.caption(
             f"**Window:** {_recency_window_phrase(days_window)} (when dated). "
             "**Remotive** = free · **SerpAPI** = paid. "
-            "**−** = title/company/category rule · sidebar **Title ignore words** = keywords · **✕** removes rules."
+            "**−** = title/company/category rule · sidebar **Title ignore words** = keywords · **✕** removes rules. "
+            "**Salary** uses the feed when present; otherwise a range is parsed from posting text when available."
         )
         if not has_fetched_jobs:
             st.info("Use **Refresh jobs** in the sidebar (**Remotive** / **SerpAPI** / both).")
@@ -1017,7 +1022,7 @@ def main() -> None:
                                 st.toast("Category excluded (filter updated)")
                                 st.rerun()
                         with cols[7]:
-                            st.text(_truncate(salary, MAX_PAY_LEN) if salary else "—")
+                            st.text(_truncate(salary, MAX_SALARY_DISPLAY_LEN) if salary else "—")
                         with cols[8]:
                             if url:
                                 safe = html.escape(url, quote=True)
