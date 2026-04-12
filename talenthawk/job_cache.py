@@ -1,4 +1,9 @@
-"""On-disk cache for job listings under ``data/jobs/`` (TTL + config fingerprint)."""
+"""On-disk cache for job listings under ``data/jobs/`` (TTL + config fingerprint).
+
+Each successful **live** fetch **merges** new rows into the existing file (deduped by job id /
+title+company+url). Older listings stay on disk until you delete the file — nothing is dropped
+just because they disappeared from the latest API response.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,33 @@ from talenthawk.settings import JOBS_CACHE_CAREER_SUBDIR, JOBS_CACHE_DIR, JOBS_C
 
 CACHE_FORMAT_VERSION = 1
 DEFAULT_TTL_SECONDS = 4 * 60 * 60  # 4 hours
+
+
+def job_row_key(job: dict[str, Any]) -> str:
+    """Stable id for deduping merged snapshots (incoming overwrites same key)."""
+    jid = str(job.get("job_id") or "").strip()
+    if jid:
+        return f"id:{jid}"
+    title = str(job.get("title") or "").strip()
+    company = str(job.get("company") or "").strip()
+    url = str(job.get("url") or "").strip()
+    h = hashlib.sha256(f"{title}\0{company}\0{url}".encode("utf-8")).hexdigest()[:22]
+    return f"h:{h}"
+
+
+def merge_job_lists(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Union by :func:`job_row_key`; **incoming** wins on key collision (newer fetch updates fields)."""
+    by_key: dict[str, dict[str, Any]] = {}
+    for j in existing:
+        if isinstance(j, dict):
+            by_key[job_row_key(j)] = j
+    for j in incoming:
+        if isinstance(j, dict):
+            by_key[job_row_key(j)] = j
+    return list(by_key.values())
 
 
 def jobs_career_cache_dir() -> Path:
@@ -68,6 +100,23 @@ def _is_fresh(fetched_at: object, ttl_seconds: int) -> bool:
     return age.total_seconds() <= ttl_seconds
 
 
+def load_career_company_jobs_disk(company_id: str) -> list[dict[str, Any]]:
+    """All cached jobs for ``company_id`` if the file exists (ignores TTL); for merge-after-fetch."""
+    path = career_cache_path(company_id)
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, dict) or data.get("version") != CACHE_FORMAT_VERSION:
+        return []
+    jobs = data.get("jobs")
+    if not isinstance(jobs, list):
+        return []
+    return [j for j in jobs if isinstance(j, dict)]
+
+
 def read_career_company_cache(
     company_id: str,
     *,
@@ -103,13 +152,16 @@ def write_career_company_cache(
     if not jobs:
         return
     ensure_jobs_cache_dirs()
+    prior = load_career_company_jobs_disk(company_id)
+    merged = merge_job_lists(prior, jobs)
     envelope: dict[str, Any] = {
         "version": CACHE_FORMAT_VERSION,
         "company_id": company_id,
         "config_fingerprint": config_fingerprint,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": source,
-        "jobs": jobs,
+        "jobs": merged,
+        "accumulated_count": len(merged),
     }
     path = career_cache_path(company_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +188,23 @@ def feed_cache_fingerprint(
 
 def feed_cache_path(fingerprint: str) -> Path:
     return jobs_feed_cache_dir() / f"{fingerprint}.json"
+
+
+def load_feed_jobs_disk(fingerprint: str) -> list[dict[str, Any]]:
+    """Jobs in the feed cache file if present (ignores TTL)."""
+    path = feed_cache_path(fingerprint)
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, dict) or data.get("version") != CACHE_FORMAT_VERSION:
+        return []
+    jobs = data.get("jobs")
+    if not isinstance(jobs, list):
+        return []
+    return [j for j in jobs if isinstance(j, dict)]
 
 
 def read_jobs_feed_cache(
@@ -177,6 +246,8 @@ def write_jobs_feed_cache(
     if not jobs:
         return
     ensure_jobs_cache_dirs()
+    prior = load_feed_jobs_disk(fingerprint)
+    merged = merge_job_lists(prior, jobs)
     envelope: dict[str, Any] = {
         "version": CACHE_FORMAT_VERSION,
         "feed_fingerprint": fingerprint,
@@ -186,7 +257,8 @@ def write_jobs_feed_cache(
         "serpapi_max_pages": serpapi_max_pages,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source_label": source_label,
-        "jobs": jobs,
+        "jobs": merged,
+        "accumulated_count": len(merged),
     }
     path = feed_cache_path(fingerprint)
     path.parent.mkdir(parents=True, exist_ok=True)
