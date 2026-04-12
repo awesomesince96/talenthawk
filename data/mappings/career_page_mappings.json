@@ -48,6 +48,86 @@
       "serpapi_location": "United States",
       "serpapi_max_pages": 5,
       "serpapi_company_substring": "meta, facebook"
+    },
+    {
+      "id": "databricks",
+      "display_name": "Databricks",
+      "careers_list_url": "https://www.databricks.com/company/careers",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Databricks software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "databricks"
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "careers_list_url": "https://openai.com/careers",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "OpenAI software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "openai, open ai"
+    },
+    {
+      "id": "notion",
+      "display_name": "Notion",
+      "careers_list_url": "https://www.notion.so/careers",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Notion software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "notion"
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "careers_list_url": "https://www.anthropic.com/jobs",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Anthropic software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "anthropic"
+    },
+    {
+      "id": "broadcom",
+      "display_name": "Broadcom",
+      "careers_list_url": "https://careers.broadcom.com/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Broadcom software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "broadcom"
+    },
+    {
+      "id": "citadel",
+      "display_name": "Citadel",
+      "careers_list_url": "https://www.citadel.com/careers/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Citadel software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "citadel"
+    },
+    {
+      "id": "janestreet",
+      "display_name": "Jane Street",
+      "careers_list_url": "https://www.janestreet.com/join-jss/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Jane Street software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "jane street"
+    },
+    {
+      "id": "samsara",
+      "display_name": "Samsara",
+      "careers_list_url": "https://www.samsara.com/company/careers",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Samsara software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "samsara"
     }
   ]
 }
