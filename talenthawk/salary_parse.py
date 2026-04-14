@@ -99,6 +99,21 @@ def gather_job_description_text(job: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def job_summary_plain_text(job: dict[str, Any]) -> str:
+    """
+    Plain text for analytics: prefer a short teaser when present (e.g. ``description_short``
+    on career payloads), otherwise strip HTML from the full description / qualifications
+    text from :func:`gather_job_description_text`.
+    """
+    raw = job.get("raw")
+    if isinstance(raw, dict):
+        ds = raw.get("description_short")
+        if isinstance(ds, str) and ds.strip():
+            return _prepare_text(ds)
+    blob = gather_job_description_text(job)
+    return _prepare_text(blob)
+
+
 def salary_display_for_api_job(job: dict[str, Any]) -> str:
     """Prefer explicit ``salary`` from the feed; otherwise parse from description text."""
     explicit = str(job.get("salary") or "").strip()

@@ -19,7 +19,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from talenthawk.career_page_tracker import fetch_tracked_career_jobs, sort_career_jobs_by_created_desc
-from talenthawk.salary_parse import salary_display_for_api_job, salary_display_for_career_row
+from talenthawk.salary_parse import (
+    job_summary_plain_text,
+    salary_display_for_api_job,
+    salary_display_for_career_row,
+)
 from talenthawk.job_cache import (
     DEFAULT_TTL_SECONDS,
     ensure_jobs_cache_dirs,
@@ -113,6 +117,69 @@ TITLE_KEYWORD_STOPWORDS = frozenset(
         "apac",
         "latam",
     }
+)
+
+SUMMARY_EXTRA_STOPWORDS = frozenset(
+    {
+        "experience",
+        "years",
+        "year",
+        "working",
+        "skills",
+        "strong",
+        "excellent",
+        "looking",
+        "including",
+        "position",
+        "role",
+        "responsibilities",
+        "requirements",
+        "qualifications",
+        "preferred",
+        "required",
+        "opportunities",
+        "opportunity",
+        "join",
+        "business",
+        "customers",
+        "customer",
+        "various",
+        "related",
+        "ensure",
+        "support",
+        "services",
+        "service",
+        "based",
+        "global",
+        "lead",
+        "leading",
+        "multiple",
+        "well",
+        "highly",
+        "relevant",
+        "understanding",
+        "understand",
+        "proven",
+        "demonstrated",
+        "environment",
+        "internal",
+        "external",
+        "ability",
+        "abilities",
+        "must",
+        "will",
+    }
+)
+
+SUMMARY_KEYWORD_STOPWORDS = TITLE_KEYWORD_STOPWORDS | SUMMARY_EXTRA_STOPWORDS
+
+SUMMARY_KEYWORD_DIST_TOP_N = 24
+SUMMARY_LEN_BUCKET_ORDER = (
+    "No summary text",
+    "1–49 words",
+    "50–149 words",
+    "150–299 words",
+    "300+ words",
 )
 
 _WORD_TOKEN_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?", re.I)
@@ -220,6 +287,134 @@ def _render_title_keyword_distribution(
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _tokenize_summary_words(text: str, *, min_len: int = 3) -> list[str]:
+    out: list[str] = []
+    for m in _WORD_TOKEN_RE.finditer(text or ""):
+        w = m.group(0).lower()
+        if len(w) >= min_len and w not in SUMMARY_KEYWORD_STOPWORDS:
+            out.append(w)
+    return out
+
+
+def _summary_word_index(company_title_rows_from_jobs: list[dict]) -> dict[str, list[tuple[str, str]]]:
+    idx: dict[str, list[tuple[str, str]]] = {}
+    for j in company_title_rows_from_jobs:
+        company = (j.get("company") or "").strip() or "—"
+        title = (j.get("title") or "").strip() or "—"
+        text = job_summary_plain_text(j)
+        seen: set[str] = set()
+        for w in _tokenize_summary_words(text):
+            if w in seen:
+                continue
+            seen.add(w)
+            idx.setdefault(w, []).append((company, title))
+    return idx
+
+
+def _bucket_summary_word_count(wc: int) -> str:
+    if wc <= 0:
+        return "No summary text"
+    if wc < 50:
+        return "1–49 words"
+    if wc < 150:
+        return "50–149 words"
+    if wc < 300:
+        return "150–299 words"
+    return "300+ words"
+
+
+def _render_summary_length_distribution(jobs: list[dict]) -> None:
+    """Histogram of word counts for :func:`talenthawk.salary_parse.job_summary_plain_text`."""
+    st.subheader("Summary length (word count)")
+    st.caption(
+        "Teaser text when the feed provides it (e.g. **description_short**), else full cleaned description. "
+        "Jobs with no text fall under **No summary text**."
+    )
+    counts: dict[str, int] = {k: 0 for k in SUMMARY_LEN_BUCKET_ORDER}
+    for j in jobs:
+        text = job_summary_plain_text(j)
+        wc = len(text.split()) if text else 0
+        b = _bucket_summary_word_count(wc)
+        counts[b] = counts[b] + 1
+    x = list(SUMMARY_LEN_BUCKET_ORDER)
+    y = [counts[k] for k in x]
+    if sum(y) == 0:
+        st.caption("No rows to chart.")
+        return
+    fig = go.Figure(
+        data=go.Bar(
+            x=x,
+            y=y,
+            marker=dict(color=y, colorscale="Blues", showscale=False),
+        )
+    )
+    fig.update_layout(
+        height=320,
+        margin=dict(l=8, r=8, t=12, b=80),
+        xaxis_title="",
+        yaxis_title="Jobs",
+        showlegend=False,
+        xaxis_tickangle=-28,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_summary_keyword_distribution(jobs: list[dict]) -> None:
+    """Horizontal bar of token frequencies in summary text (hover: company + title)."""
+    st.subheader("Summary keyword distribution")
+    st.caption(
+        "Each bar = rows whose **summary** text contains the token (HTML stripped; common résumé-style filler omitted)."
+    )
+    idx = _summary_word_index(jobs)
+    if not idx:
+        st.caption("No summary words to chart (add listings with description text).")
+        return
+    ranked = sorted(idx.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:SUMMARY_KEYWORD_DIST_TOP_N]
+    ranked_bar = list(reversed(ranked))
+    words_y = [w for w, _ in ranked_bar]
+    cnts = [len(idx[w]) for w in words_y]
+    hover_bodies = [
+        "<br>".join(_hover_company_title_line(co, ti) for co, ti in idx[w]) for w in words_y
+    ]
+    fig = go.Figure(
+        data=go.Bar(
+            x=cnts,
+            y=words_y,
+            orientation="h",
+            customdata=hover_bodies,
+            marker=dict(color=cnts, colorscale="Cividis", showscale=False),
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "<b>%{x}</b> row(s)<br><br>"
+                "%{customdata}<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        height=max(300, min(900, 36 * len(words_y) + 120)),
+        margin=dict(l=8, r=8, t=12, b=48),
+        xaxis_title="Rows (summary contains word)",
+        yaxis=dict(title=""),
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _jobs_api_row_matches_search(job: dict, q: str) -> bool:
+    if not (q or "").strip():
+        return True
+    ql = q.strip().lower()
+    parts = [
+        str(job.get("job_id") or ""),
+        str(job.get("title") or ""),
+        str(job.get("company") or ""),
+        str(job.get("category") or ""),
+        str(job.get("salary") or ""),
+        str(job.get("source") or ""),
+    ]
+    return any(ql in p.lower() for p in parts)
 
 
 def _render_top_n_pie(
@@ -902,6 +1097,9 @@ def main() -> None:
                         for r in visible_career
                     ],
                 )
+                with st.expander("Job summary distribution (Career tracker)", expanded=False):
+                    _render_summary_length_distribution(visible_career)
+                    _render_summary_keyword_distribution(visible_career)
         elif st.session_state.get("career_tracker_errs"):
             st.caption("No rows to show.")
         else:
@@ -1042,6 +1240,10 @@ def main() -> None:
                         )
                     ],
                 )
+                jobs_for_summary_charts = [j for j in included if _jobs_api_row_matches_search(j, q)]
+                with st.expander("Job summary distribution (Jobs API)", expanded=False):
+                    _render_summary_length_distribution(jobs_for_summary_charts)
+                    _render_summary_keyword_distribution(jobs_for_summary_charts)
         else:
             if not has_fetched_jobs:
                 st.caption("Load listings with **Refresh jobs** in the sidebar.")
