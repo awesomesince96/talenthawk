@@ -188,6 +188,16 @@
       "serpapi_location": "United States",
       "serpapi_max_pages": 5,
       "serpapi_company_substring": "linkedin"
+    },
+    {
+      "id": "waymo",
+      "display_name": "Waymo",
+      "careers_list_url": "https://waymo.com/careers/",
+      "fetcher": "serpapi_careers",
+      "serpapi_query": "Waymo software engineer",
+      "serpapi_location": "United States",
+      "serpapi_max_pages": 5,
+      "serpapi_company_substring": "waymo"
     }
   ]
 }
