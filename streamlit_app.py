@@ -349,6 +349,125 @@ def _filter_career_list_with_charts(rows: list[dict]) -> list[dict]:
     return out
 
 
+def _bump_jobs_plotly_nonces() -> None:
+    for nk in (NONCE_PLOTLY_JOBS_TITLE_KW, NONCE_PLOTLY_JOBS_SUM_LEN, NONCE_PLOTLY_JOBS_SUM_KW):
+        st.session_state[nk] = int(st.session_state.get(nk) or 0) + 1
+
+
+def _bump_career_plotly_nonces() -> None:
+    for nk in (NONCE_PLOTLY_CAREER_TITLE_KW, NONCE_PLOTLY_CAREER_SUM_LEN, NONCE_PLOTLY_CAREER_SUM_KW):
+        st.session_state[nk] = int(st.session_state.get(nk) or 0) + 1
+
+
+def _clear_all_jobs_chart_cross_filters() -> None:
+    st.session_state[SS_JOBS_HIDE_TITLE_KW] = []
+    st.session_state[SS_JOBS_HIDE_SUMMARY_KW] = []
+    st.session_state[SS_JOBS_HIDE_SUMMARY_BUCKET] = []
+    _bump_jobs_plotly_nonces()
+
+
+def _clear_all_career_chart_cross_filters() -> None:
+    st.session_state[SS_CAREER_HIDE_TITLE_KW] = []
+    st.session_state[SS_CAREER_HIDE_SUMMARY_KW] = []
+    st.session_state[SS_CAREER_HIDE_SUMMARY_BUCKET] = []
+    _bump_career_plotly_nonces()
+
+
+def _remove_one_cross_filter(hide_key: str, value: str) -> None:
+    cur = [x for x in (st.session_state.get(hide_key) or []) if x != value]
+    st.session_state[hide_key] = cur
+
+
+def _render_cross_filter_panel_jobs() -> None:
+    """Single place to see chart-driven filters that apply together (AND) across table + all charts."""
+    ht = list(st.session_state.get(SS_JOBS_HIDE_TITLE_KW) or [])
+    hs = list(st.session_state.get(SS_JOBS_HIDE_SUMMARY_KW) or [])
+    hb = list(st.session_state.get(SS_JOBS_HIDE_SUMMARY_BUCKET) or [])
+    if not ht and not hs and not hb:
+        return
+    with st.expander("Active chart cross-filters (session)", expanded=True):
+        st.caption(
+            "Bar selections on **title keywords**, **summary keywords**, and **summary length** combine here (**AND**). "
+            "The table and every chart below use the same filtered rows. Remove a chip or clear all."
+        )
+        if st.button("Clear all chart cross-filters", key="clear_all_jobs_cross_filters"):
+            _clear_all_jobs_chart_cross_filters()
+            st.rerun()
+        if ht:
+            st.markdown("**Title keywords** (hidden if title contains token)")
+            for i, v in enumerate(ht):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_jobs_tkw_{i}", help="Remove this title-keyword filter"):
+                        _remove_one_cross_filter(SS_JOBS_HIDE_TITLE_KW, v)
+                        st.rerun()
+        if hs:
+            st.markdown("**Summary keywords**")
+            for i, v in enumerate(hs):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_jobs_skw_{i}", help="Remove this summary-keyword filter"):
+                        _remove_one_cross_filter(SS_JOBS_HIDE_SUMMARY_KW, v)
+                        st.rerun()
+        if hb:
+            st.markdown("**Summary length buckets**")
+            for i, v in enumerate(hb):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_jobs_bkt_{i}", help="Remove this length-bucket filter"):
+                        _remove_one_cross_filter(SS_JOBS_HIDE_SUMMARY_BUCKET, v)
+                        st.rerun()
+
+
+def _render_cross_filter_panel_career() -> None:
+    ht = list(st.session_state.get(SS_CAREER_HIDE_TITLE_KW) or [])
+    hs = list(st.session_state.get(SS_CAREER_HIDE_SUMMARY_KW) or [])
+    hb = list(st.session_state.get(SS_CAREER_HIDE_SUMMARY_BUCKET) or [])
+    if not ht and not hs and not hb:
+        return
+    with st.expander("Active chart cross-filters (session)", expanded=True):
+        st.caption("Same as **Jobs API**: chart selections stack (**AND**); table and charts share one filtered dataset.")
+        if st.button("Clear all chart cross-filters", key="clear_all_career_cross_filters"):
+            _clear_all_career_chart_cross_filters()
+            st.rerun()
+        if ht:
+            st.markdown("**Title keywords**")
+            for i, v in enumerate(ht):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_car_tkw_{i}", help="Remove"):
+                        _remove_one_cross_filter(SS_CAREER_HIDE_TITLE_KW, v)
+                        st.rerun()
+        if hs:
+            st.markdown("**Summary keywords**")
+            for i, v in enumerate(hs):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_car_skw_{i}", help="Remove"):
+                        _remove_one_cross_filter(SS_CAREER_HIDE_SUMMARY_KW, v)
+                        st.rerun()
+        if hb:
+            st.markdown("**Summary length buckets**")
+            for i, v in enumerate(hb):
+                c1, c2 = st.columns([0.88, 0.12], vertical_alignment="center")
+                with c1:
+                    st.text(v)
+                with c2:
+                    if st.button("✕", key=f"rm_car_bkt_{i}", help="Remove"):
+                        _remove_one_cross_filter(SS_CAREER_HIDE_SUMMARY_BUCKET, v)
+                        st.rerun()
+
+
 def _format_recency_days(n: int) -> str:
     if n == 1:
         return "Last 1 day"
@@ -1255,6 +1374,7 @@ def main() -> None:
             ]
             sync_career_plotly_selections_into_hides()
             visible_career = _filter_career_list_with_charts(visible_career)
+            _render_cross_filter_panel_career()
             n_c = len(c_rows)
             n_vis = len(visible_career)
             if n_vis < n_c:
@@ -1373,20 +1493,21 @@ def main() -> None:
         if not has_fetched_jobs:
             st.info("Use **Refresh jobs** in the sidebar (**Remotive** / **SerpAPI** / both).")
 
-        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-        c1.metric("Fetched (feed)", len(raw))
-        c2.metric(_format_recency_days(days_window), len(windowed))
-        c3.metric("Shown", len(included))
-        c4.metric("Hidden (title rules)", len(excluded_title))
-        c5.metric("Hidden (title words)", len(excluded_title_words))
-        c6.metric("Hidden (company)", len(excluded_company))
-        c7.metric("Hidden (category)", len(excluded_category))
-
         q = st.text_input("Search Jobs API listings (id, title, company, category, salary, source)", "")
         sync_jobs_api_plotly_selections_into_hides()
         df_i = pd.DataFrame(included)
         jobs_visible = _filter_jobs_api_list_with_charts(included, q) if not df_i.empty else []
         df_show = pd.DataFrame(jobs_visible)
+        _render_cross_filter_panel_jobs()
+
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+        c1.metric("Fetched (feed)", len(raw))
+        c2.metric(_format_recency_days(days_window), len(windowed))
+        c3.metric("Shown (search + charts)", len(jobs_visible))
+        c4.metric("Hidden (title rules)", len(excluded_title))
+        c5.metric("Hidden (title words)", len(excluded_title_words))
+        c6.metric("Hidden (company)", len(excluded_company))
+        c7.metric("Hidden (category)", len(excluded_category))
 
         if not df_i.empty:
             n_show = len(df_show)
