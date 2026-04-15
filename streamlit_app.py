@@ -195,6 +195,14 @@ SS_CAREER_HIDE_TITLE_KW = "career_chart_hide_title_tokens"
 SS_CAREER_HIDE_SUMMARY_KW = "career_chart_hide_summary_tokens"
 SS_CAREER_HIDE_SUMMARY_BUCKET = "career_chart_hide_summary_buckets"
 
+# Bump to remount Plotly widgets after **Clear chart hides** so stale selection does not re-apply hides.
+NONCE_PLOTLY_JOBS_TITLE_KW = "nonce_plotly_jobs_title_kw"
+NONCE_PLOTLY_JOBS_SUM_LEN = "nonce_plotly_jobs_sum_len"
+NONCE_PLOTLY_JOBS_SUM_KW = "nonce_plotly_jobs_sum_kw"
+NONCE_PLOTLY_CAREER_TITLE_KW = "nonce_plotly_career_title_kw"
+NONCE_PLOTLY_CAREER_SUM_LEN = "nonce_plotly_career_sum_len"
+NONCE_PLOTLY_CAREER_SUM_KW = "nonce_plotly_career_sum_kw"
+
 
 def _init_chart_hide_session_keys() -> None:
     for k in (
@@ -207,47 +215,93 @@ def _init_chart_hide_session_keys() -> None:
     ):
         if k not in st.session_state:
             st.session_state[k] = []
+    for nk in (
+        NONCE_PLOTLY_JOBS_TITLE_KW,
+        NONCE_PLOTLY_JOBS_SUM_LEN,
+        NONCE_PLOTLY_JOBS_SUM_KW,
+        NONCE_PLOTLY_CAREER_TITLE_KW,
+        NONCE_PLOTLY_CAREER_SUM_LEN,
+        NONCE_PLOTLY_CAREER_SUM_KW,
+    ):
+        if nk not in st.session_state:
+            st.session_state[nk] = 0
 
 
-def _plotly_toggle_selected_labels(
-    chart_widget_key: str,
-    hide_session_key: str,
-    *,
-    label_from_point: Callable[[dict], str | None],
-) -> bool:
-    """Toggle each selected bar’s label in the hide list. Returns True if state changed."""
+def _plotly_points(chart_widget_key: str) -> list[dict]:
     w = st.session_state.get(chart_widget_key)
     if w is None:
-        return False
+        return []
     sel = getattr(w, "selection", None)
     if sel is None and isinstance(w, dict):
         sel = w.get("selection")
     if sel is None:
-        return False
+        return []
     if isinstance(sel, dict):
-        points = sel.get("points") or []
+        pts = sel.get("points") or []
     else:
-        points = getattr(sel, "points", None) or []
-    if not points:
-        return False
-    hidden = list(st.session_state.get(hide_session_key) or [])
-    hs = set(hidden)
-    for pt in points:
-        if not isinstance(pt, dict):
-            continue
-        label = label_from_point(pt)
-        if not label:
-            continue
-        if label in hs:
-            hs.discard(label)
-        else:
-            hs.add(label)
-    new_list = sorted(hs, key=str.lower)
-    old_sorted = sorted(hidden, key=str.lower)
-    if new_list != old_sorted:
+        pts = getattr(sel, "points", None) or []
+    return [p for p in pts if isinstance(p, dict)]
+
+
+def _sync_plotly_selection_to_hides(
+    chart_widget_key: str,
+    hide_session_key: str,
+    *,
+    label_from_point: Callable[[dict], str | None],
+) -> None:
+    """
+    Mirror current Plotly bar selection into the hide list (selected categories = hidden from the table).
+    Call **before** building filtered job rows so the table and charts stay in sync.
+    """
+    if st.session_state.get(chart_widget_key) is None:
+        return
+    labels: list[str] = []
+    for pt in _plotly_points(chart_widget_key):
+        lab = label_from_point(pt)
+        if lab:
+            labels.append(lab)
+    new_list = sorted({x for x in labels if x}, key=str.lower)
+    old = sorted(list(st.session_state.get(hide_session_key) or []), key=str.lower)
+    if new_list != old:
         st.session_state[hide_session_key] = new_list
-        return True
-    return False
+
+
+def sync_jobs_api_plotly_selections_into_hides() -> None:
+    """Apply Jobs API Plotly widget state to session hide lists (must run after widgets exist, before filtering)."""
+    _sync_plotly_selection_to_hides(
+        f"jobs_api_title_kw_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_TITLE_KW, 0)}",
+        SS_JOBS_HIDE_TITLE_KW,
+        label_from_point=lambda p: (str(p.get("y") or p.get("label") or "").strip() or None),
+    )
+    _sync_plotly_selection_to_hides(
+        f"jobs_api_summary_len_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_SUM_LEN, 0)}",
+        SS_JOBS_HIDE_SUMMARY_BUCKET,
+        label_from_point=lambda p: (str(p.get("x") or p.get("label") or "").strip() or None),
+    )
+    _sync_plotly_selection_to_hides(
+        f"jobs_api_summary_kw_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_SUM_KW, 0)}",
+        SS_JOBS_HIDE_SUMMARY_KW,
+        label_from_point=lambda p: (str(p.get("y") or p.get("label") or "").strip() or None),
+    )
+
+
+def sync_career_plotly_selections_into_hides() -> None:
+    """Same as :func:`sync_jobs_api_plotly_selections_into_hides` for Career tracker charts."""
+    _sync_plotly_selection_to_hides(
+        f"career_title_kw_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_TITLE_KW, 0)}",
+        SS_CAREER_HIDE_TITLE_KW,
+        label_from_point=lambda p: (str(p.get("y") or p.get("label") or "").strip() or None),
+    )
+    _sync_plotly_selection_to_hides(
+        f"career_summary_len_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_SUM_LEN, 0)}",
+        SS_CAREER_HIDE_SUMMARY_BUCKET,
+        label_from_point=lambda p: (str(p.get("x") or p.get("label") or "").strip() or None),
+    )
+    _sync_plotly_selection_to_hides(
+        f"career_summary_kw_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_SUM_KW, 0)}",
+        SS_CAREER_HIDE_SUMMARY_KW,
+        label_from_point=lambda p: (str(p.get("y") or p.get("label") or "").strip() or None),
+    )
 
 
 def _filter_jobs_api_list_with_charts(jobs: list[dict], q: str) -> list[dict]:
@@ -355,6 +409,7 @@ def _render_title_keyword_distribution(
     subheader: str = "Title keyword distribution",
     chart_key: str | None = None,
     hide_session_key: str | None = None,
+    clear_nonce_key: str | None = None,
 ) -> None:
     """Horizontal bar chart of how many rows contain each word in the title; hover lists company + title."""
     st.subheader(subheader)
@@ -364,8 +419,9 @@ def _render_title_keyword_distribution(
     )
     if chart_key and hide_session_key:
         st.caption(
-            "**Interactive:** click bar(s) to select, then **Toggle selected bar(s) in results** to hide or show "
-            "those keywords in the listing (session only). **Clear chart hides** resets this chart’s filters."
+            "**Interactive:** select one or more bars — the **table above** and **other charts** refresh on the next run "
+            "(selected categories are hidden from results). Deselect all bars on this chart to clear its filter. "
+            "**Clear chart hides** also resets this chart and remounts it."
         )
     idx = _word_to_company_title_index(company_title_rows)
     if not idx:
@@ -409,24 +465,14 @@ def _render_title_keyword_distribution(
             on_select="rerun",
             selection_mode="points",
         )
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Toggle selected bar(s) in results", key=f"tg_{chart_key}"):
-                if _plotly_toggle_selected_labels(
-                    chart_key,
-                    hide_session_key,
-                    label_from_point=lambda p: (
-                        str(p.get("y") or p.get("label") or "").strip() or None
-                    ),
-                ):
-                    st.rerun()
-        with c2:
-            if st.button("Clear chart hides", key=f"cl_{chart_key}"):
-                st.session_state[hide_session_key] = []
-                st.rerun()
+        if st.button("Clear chart hides", key=f"cl_{chart_key}"):
+            st.session_state[hide_session_key] = []
+            if clear_nonce_key:
+                st.session_state[clear_nonce_key] = int(st.session_state.get(clear_nonce_key) or 0) + 1
+            st.rerun()
         hid = st.session_state.get(hide_session_key) or []
         if hid:
-            st.caption("Keywords temporarily hidden from the table: **" + "**, **".join(hid) + "**")
+            st.caption("Keywords hidden from the table (from bar selection): **" + "**, **".join(hid) + "**")
     else:
         st.plotly_chart(fig, use_container_width=True)
 
@@ -472,6 +518,7 @@ def _render_summary_length_distribution(
     *,
     chart_key: str | None = None,
     hide_session_key: str | None = None,
+    clear_nonce_key: str | None = None,
 ) -> None:
     """Histogram of word counts for :func:`talenthawk.salary_parse.job_summary_plain_text`."""
     st.subheader("Summary length (word count)")
@@ -481,7 +528,7 @@ def _render_summary_length_distribution(
     )
     if chart_key and hide_session_key:
         st.caption(
-            "**Interactive:** select bar(s), then **Toggle** hides or restores jobs in those length buckets in the table."
+            "**Interactive:** select length bucket bar(s) to hide those jobs from the table; all charts update together."
         )
     counts: dict[str, int] = {k: 0 for k in SUMMARY_LEN_BUCKET_ORDER}
     for j in jobs:
@@ -517,21 +564,11 @@ def _render_summary_length_distribution(
             on_select="rerun",
             selection_mode="points",
         )
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Toggle selected bar(s) in results", key=f"tg_{chart_key}"):
-                if _plotly_toggle_selected_labels(
-                    chart_key,
-                    hide_session_key,
-                    label_from_point=lambda p: (
-                        str(p.get("x") or p.get("label") or "").strip() or None
-                    ),
-                ):
-                    st.rerun()
-        with c2:
-            if st.button("Clear chart hides", key=f"cl_{chart_key}"):
-                st.session_state[hide_session_key] = []
-                st.rerun()
+        if st.button("Clear chart hides", key=f"cl_{chart_key}"):
+            st.session_state[hide_session_key] = []
+            if clear_nonce_key:
+                st.session_state[clear_nonce_key] = int(st.session_state.get(clear_nonce_key) or 0) + 1
+            st.rerun()
         hid = st.session_state.get(hide_session_key) or []
         if hid:
             st.caption("Length buckets hidden from the table: **" + "**, **".join(hid) + "**")
@@ -544,6 +581,7 @@ def _render_summary_keyword_distribution(
     *,
     chart_key: str | None = None,
     hide_session_key: str | None = None,
+    clear_nonce_key: str | None = None,
 ) -> None:
     """Horizontal bar of token frequencies in summary text (hover: company + title)."""
     st.subheader("Summary keyword distribution")
@@ -552,7 +590,7 @@ def _render_summary_keyword_distribution(
     )
     if chart_key and hide_session_key:
         st.caption(
-            "**Interactive:** select bar(s), then **Toggle** hides or restores jobs whose **summary** contains that token."
+            "**Interactive:** select bar(s) to hide those summary tokens from the table; charts stay aligned."
         )
     idx = _summary_word_index(jobs)
     if not idx:
@@ -594,21 +632,11 @@ def _render_summary_keyword_distribution(
             on_select="rerun",
             selection_mode="points",
         )
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Toggle selected bar(s) in results", key=f"tg_{chart_key}"):
-                if _plotly_toggle_selected_labels(
-                    chart_key,
-                    hide_session_key,
-                    label_from_point=lambda p: (
-                        str(p.get("y") or p.get("label") or "").strip() or None
-                    ),
-                ):
-                    st.rerun()
-        with c2:
-            if st.button("Clear chart hides", key=f"cl_{chart_key}"):
-                st.session_state[hide_session_key] = []
-                st.rerun()
+        if st.button("Clear chart hides", key=f"cl_{chart_key}"):
+            st.session_state[hide_session_key] = []
+            if clear_nonce_key:
+                st.session_state[clear_nonce_key] = int(st.session_state.get(clear_nonce_key) or 0) + 1
+            st.rerun()
         hid = st.session_state.get(hide_session_key) or []
         if hid:
             st.caption("Summary keywords hidden from the table: **" + "**, **".join(hid) + "**")
@@ -1225,6 +1253,7 @@ def main() -> None:
                 for r in c_rows
                 if job_is_included(r, title_filters, company_filters, category_filters, title_ignore_words)
             ]
+            sync_career_plotly_selections_into_hides()
             visible_career = _filter_career_list_with_charts(visible_career)
             n_c = len(c_rows)
             n_vis = len(visible_career)
@@ -1312,19 +1341,22 @@ def main() -> None:
                         )
                         for r in visible_career
                     ],
-                    chart_key="career_title_kw_plotly",
+                    chart_key=f"career_title_kw_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_TITLE_KW, 0)}",
                     hide_session_key=SS_CAREER_HIDE_TITLE_KW,
+                    clear_nonce_key=NONCE_PLOTLY_CAREER_TITLE_KW,
                 )
                 with st.expander("Job summary distribution (Career tracker)", expanded=False):
                     _render_summary_length_distribution(
                         visible_career,
-                        chart_key="career_summary_len_plotly",
+                        chart_key=f"career_summary_len_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_SUM_LEN, 0)}",
                         hide_session_key=SS_CAREER_HIDE_SUMMARY_BUCKET,
+                        clear_nonce_key=NONCE_PLOTLY_CAREER_SUM_LEN,
                     )
                     _render_summary_keyword_distribution(
                         visible_career,
-                        chart_key="career_summary_kw_plotly",
+                        chart_key=f"career_summary_kw_plotly_{st.session_state.get(NONCE_PLOTLY_CAREER_SUM_KW, 0)}",
                         hide_session_key=SS_CAREER_HIDE_SUMMARY_KW,
+                        clear_nonce_key=NONCE_PLOTLY_CAREER_SUM_KW,
                     )
         elif st.session_state.get("career_tracker_errs"):
             st.caption("No rows to show.")
@@ -1351,6 +1383,7 @@ def main() -> None:
         c7.metric("Hidden (category)", len(excluded_category))
 
         q = st.text_input("Search Jobs API listings (id, title, company, category, salary, source)", "")
+        sync_jobs_api_plotly_selections_into_hides()
         df_i = pd.DataFrame(included)
         jobs_visible = _filter_jobs_api_list_with_charts(included, q) if not df_i.empty else []
         df_show = pd.DataFrame(jobs_visible)
@@ -1451,19 +1484,22 @@ def main() -> None:
                             strict=True,
                         )
                     ],
-                    chart_key="jobs_api_title_kw_plotly",
+                    chart_key=f"jobs_api_title_kw_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_TITLE_KW, 0)}",
                     hide_session_key=SS_JOBS_HIDE_TITLE_KW,
+                    clear_nonce_key=NONCE_PLOTLY_JOBS_TITLE_KW,
                 )
                 with st.expander("Job summary distribution (Jobs API)", expanded=False):
                     _render_summary_length_distribution(
                         jobs_visible,
-                        chart_key="jobs_api_summary_len_plotly",
+                        chart_key=f"jobs_api_summary_len_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_SUM_LEN, 0)}",
                         hide_session_key=SS_JOBS_HIDE_SUMMARY_BUCKET,
+                        clear_nonce_key=NONCE_PLOTLY_JOBS_SUM_LEN,
                     )
                     _render_summary_keyword_distribution(
                         jobs_visible,
-                        chart_key="jobs_api_summary_kw_plotly",
+                        chart_key=f"jobs_api_summary_kw_plotly_{st.session_state.get(NONCE_PLOTLY_JOBS_SUM_KW, 0)}",
                         hide_session_key=SS_JOBS_HIDE_SUMMARY_KW,
+                        clear_nonce_key=NONCE_PLOTLY_JOBS_SUM_KW,
                     )
         else:
             if not has_fetched_jobs:
@@ -1471,9 +1507,10 @@ def main() -> None:
             else:
                 st.info(f"No jobs in {_recency_window_phrase(days_window)} (or feed is empty).")
 
+        df_pie_view = pd.DataFrame(jobs_visible)
         with st.expander("Category distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
-                df_i,
+                df_pie_view,
                 "category",
                 subheader="",
                 dimension_description="category inferred from job title",
@@ -1482,7 +1519,7 @@ def main() -> None:
             )
         with st.expander("Company distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
-                df_i,
+                df_pie_view,
                 "company",
                 subheader="",
                 dimension_description="company name",
@@ -1491,7 +1528,7 @@ def main() -> None:
             )
         with st.expander("Job title distribution (Jobs API)", expanded=False):
             _render_top_n_pie(
-                df_i,
+                df_pie_view,
                 "title",
                 subheader="",
                 dimension_description="exact job title",
