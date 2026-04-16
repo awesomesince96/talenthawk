@@ -10,3 +10,7 @@ venv/
 data/persistence/
 # Cached job snapshots (per company / feed fingerprint)
 data/jobs/
+
+# Frontend
+web/node_modules/
+web/dist/

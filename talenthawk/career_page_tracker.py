@@ -526,19 +526,11 @@ def fetch_via_amazon_jobs(
 
 
 def _serpapi_key_resolved() -> str:
-    """Same sources as the Streamlit app: env vars, then ``st.secrets`` when running inside Streamlit."""
+    """Resolve SerpAPI key from environment (``SERPAPI_API_KEY`` / ``SERPAPI_KEY``)."""
     for k in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
         v = os.environ.get(k, "").strip()
         if v:
             return v
-    try:
-        import streamlit as st
-
-        sec = st.secrets.get("SERPAPI_API_KEY", "")
-        if sec and str(sec).strip():
-            return str(sec).strip()
-    except (FileNotFoundError, KeyError, AttributeError, RuntimeError, ImportError, ModuleNotFoundError):
-        pass
     return ""
 
 
