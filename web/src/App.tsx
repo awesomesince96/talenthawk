@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import createPlotlyComponent from 'react-plotly.js/factory.js'
-import Plotly from 'plotly.js'
 import type { Data, Layout } from 'plotly.js'
-
-/** Pre-built component from the Plotly factory (avoids broken default import interop in production bundles). */
-const Plot = createPlotlyComponent(Plotly)
 import {
   addFilter,
   deleteFilter,
@@ -18,6 +13,7 @@ import {
   postTitleIgnore,
   type ChartIncludes,
 } from './api'
+import { Plot } from './plotlySetup'
 import './App.css'
 
 type Bootstrap = Awaited<ReturnType<typeof getBootstrap>>
