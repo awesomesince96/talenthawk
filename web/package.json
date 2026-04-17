@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "copy-plotly": "node ./scripts/copy-plotly.mjs",
+    "predev": "npm run copy-plotly",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run copy-plotly && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

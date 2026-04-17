@@ -36,7 +36,15 @@ uv sync
 cd web && npm install && cd ..
 ```
 
-**Development (recommended):** run the API and the Vite dev server in two terminals. Vite proxies `/api` to the backend.
+**One command (single terminal, fresh UI build each run):** deletes `web/dist`, rebuilds the React app, then serves API + static files on port 8000 with `--reload` for Python changes.
+
+```bash
+./dev.sh
+```
+
+Open **http://127.0.0.1:8000**.
+
+**Development (two terminals, hot-reload React):** run the API and the Vite dev server. Vite proxies `/api` to the backend.
 
 ```bash
 # Terminal 1 — API on http://127.0.0.1:8000

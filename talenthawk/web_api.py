@@ -488,6 +488,13 @@ if WEB_DIST.is_dir():
         candidate = WEB_DIST / full_path
         if candidate.is_file():
             return FileResponse(candidate)
+        # Do not serve index.html for missing scripts/CSS (would break window.Plotly etc. with silent 200 + HTML body).
+        last = full_path.rstrip("/").split("/")[-1] if full_path else ""
+        if "." in last:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Missing static file: {full_path}. Run: cd web && npm run copy-plotly && npm run build",
+            )
         if index.is_file():
             return FileResponse(index)
         raise HTTPException(status_code=404, detail="Build the web app: cd web && npm run build")

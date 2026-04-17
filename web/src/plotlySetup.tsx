@@ -1,52 +1,94 @@
 /**
- * plotly.js is UMD; Vite may bundle it without setting `globalThis.Plotly`.
- * Resolve the library from default / namespace imports first, then the global.
- * Never throw at module load — a thrown error here prevents React from mounting (blank page).
+ * Plotly is loaded from `/plotly.min.js` (see index.html), copied by `npm run copy-plotly`.
+ * The UMD bundle may attach either an object or a **function** with `newPlot` on it — both are valid.
+ * The react-plotly factory import may be nested as `module.default` (CJS interop).
  */
-import type { ComponentType } from 'react'
+import { useLayoutEffect, useState, type ComponentType } from 'react'
 import * as factoryModule from 'react-plotly.js/factory.js'
-import PlotlyDefault from 'plotly.js'
-import * as PlotlyNamespace from 'plotly.js'
+
+type PlotlyLike = { newPlot: (...args: unknown[]) => unknown }
+
+function pickCallable(...xs: unknown[]): ((plotly: unknown) => ComponentType<Record<string, unknown>>) | null {
+  for (const x of xs) {
+    if (typeof x === 'function') return x as (plotly: unknown) => ComponentType<Record<string, unknown>>
+    if (x && typeof x === 'object' && 'default' in x) {
+      const d = (x as { default: unknown }).default
+      if (typeof d === 'function') return d as (plotly: unknown) => ComponentType<Record<string, unknown>>
+      if (d && typeof d === 'object' && 'default' in d) {
+        const d2 = (d as { default: unknown }).default
+        if (typeof d2 === 'function') return d2 as (plotly: unknown) => ComponentType<Record<string, unknown>>
+      }
+    }
+  }
+  return null
+}
 
 function getCreatePlotlyComponent(): ((plotly: unknown) => ComponentType<Record<string, unknown>>) | null {
-  const m = factoryModule as unknown as { default?: unknown }
-  const fn = typeof m.default === 'function' ? m.default : factoryModule
-  if (typeof fn !== 'function') return null
-  return fn as (plotly: unknown) => ComponentType<Record<string, unknown>>
+  const m = factoryModule as unknown as Record<string, unknown>
+  return pickCallable(m.default, m, factoryModule)
 }
 
-function plotlyHasApi(x: unknown): x is { newPlot: (...args: unknown[]) => unknown } {
-  return typeof x === 'object' && x !== null && typeof (x as { newPlot?: unknown }).newPlot === 'function'
+/** Plotly public API: `newPlot` may live on an object or a function (both are typeof that allows property access). */
+function getNewPlot(x: unknown): unknown {
+  if (x == null) return undefined
+  if (typeof x === 'object' || typeof x === 'function') {
+    return (x as { newPlot?: unknown }).newPlot
+  }
+  return undefined
 }
 
-function resolvePlotly(): unknown {
-  const g = (globalThis as unknown as { Plotly?: unknown }).Plotly
-  if (plotlyHasApi(g)) return g
+function plotlyHasApi(x: unknown): x is PlotlyLike {
+  return typeof getNewPlot(x) === 'function'
+}
 
-  if (plotlyHasApi(PlotlyDefault)) return PlotlyDefault
-
-  const ns = PlotlyNamespace as unknown as { default?: unknown }
-  const fromNs = typeof ns.default === 'object' && ns.default !== null ? ns.default : PlotlyNamespace
-  if (plotlyHasApi(fromNs)) return fromNs
-
-  console.error('[TalentHawk] Plotly.js could not be resolved (no newPlot).', {
-    globalPlotly: g,
-    PlotlyDefault,
-    PlotlyNamespace,
-  })
+function unwrapPlotly(x: unknown): unknown {
+  if (plotlyHasApi(x)) return x
+  if (x && typeof x === 'object' && 'default' in x) {
+    const d = (x as { default: unknown }).default
+    if (plotlyHasApi(d)) return d
+  }
   return null
+}
+
+function resolvePlotlyFromWindow(): unknown {
+  const w = window as unknown as { Plotly?: unknown }
+  return unwrapPlotly(w.Plotly)
 }
 
 function PlotLoadError() {
   return (
     <p className="muted" style={{ padding: '0.5rem 0' }}>
-      Chart library failed to load. Check the browser console for Plotly errors.
+      Charts could not load Plotly. From the <code>web</code> folder run{' '}
+      <code>npm run copy-plotly && npm run build</code>, restart the server, then hard-refresh.
     </p>
   )
 }
 
-const create = getCreatePlotlyComponent()
-const lib = resolvePlotly()
+/**
+ * Drop-in replacement for react-plotly’s Plot; wires up after `window.Plotly` exists.
+ */
+export function Plot(props: Record<string, unknown>) {
+  const [Inner, setInner] = useState<ComponentType<Record<string, unknown>> | null>(null)
 
-export const Plot: ComponentType<Record<string, unknown>> =
-  create && lib ? create(lib) : PlotLoadError
+  useLayoutEffect(() => {
+    const create = getCreatePlotlyComponent()
+    const lib = resolvePlotlyFromWindow()
+    if (plotlyHasApi(lib) && create) {
+      setInner(() => create(lib))
+      return
+    }
+    console.error('[TalentHawk] Plotly or react-plotly factory failed.', {
+      Plotly: (window as unknown as { Plotly?: unknown }).Plotly,
+      plotlyType: typeof (window as unknown as { Plotly?: unknown }).Plotly,
+      newPlotType: typeof getNewPlot((window as unknown as { Plotly?: unknown }).Plotly),
+      hasFactory: Boolean(create),
+    })
+    setInner(() => PlotLoadError)
+  }, [])
+
+  if (!Inner) {
+    return <div className="muted" style={{ minHeight: 320 }} aria-busy="true" />
+  }
+
+  return <Inner {...props} />
+}
