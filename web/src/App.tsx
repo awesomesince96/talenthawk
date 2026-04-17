@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import Plot from 'react-plotly.js'
+import createPlotlyComponent from 'react-plotly.js/factory.js'
+import Plotly from 'plotly.js'
 import type { Data, Layout } from 'plotly.js'
+
+/** Pre-built component from the Plotly factory (avoids broken default import interop in production bundles). */
+const Plot = createPlotlyComponent(Plotly)
 import {
   addFilter,
   deleteFilter,
