@@ -97,10 +97,16 @@ export type ChartIncludes = {
   title_tokens: string[]
   summary_tokens: string[]
   summary_buckets: string[]
+  include_categories: string[]
+  include_companies: string[]
+  include_titles_exact: string[]
 }
 
 export const emptyIncludes = (): ChartIncludes => ({
   title_tokens: [],
   summary_tokens: [],
   summary_buckets: [],
+  include_categories: [],
+  include_companies: [],
+  include_titles_exact: [],
 })

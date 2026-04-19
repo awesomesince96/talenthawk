@@ -158,6 +158,10 @@ class ChartIncludes:
     title_tokens: list[str] = field(default_factory=list)
     summary_tokens: list[str] = field(default_factory=list)
     summary_buckets: list[str] = field(default_factory=list)
+    # Jobs API: exact facet matches from category / company / title distribution bars (OR within each list).
+    include_categories: list[str] = field(default_factory=list)
+    include_companies: list[str] = field(default_factory=list)
+    include_titles_exact: list[str] = field(default_factory=list)
 
 
 def truncate(text: str, max_len: int) -> str:
@@ -288,6 +292,11 @@ def jobs_api_row_matches_search(job: dict[str, Any], q: str) -> bool:
     return any(ql in p.lower() for p in parts)
 
 
+def _company_key(job: dict[str, Any]) -> str:
+    co = str(job.get("company") or "").strip()
+    return co if co else "(empty)"
+
+
 def filter_jobs_api_list_with_charts(
     jobs: list[dict[str, Any]],
     q: str,
@@ -296,6 +305,9 @@ def filter_jobs_api_list_with_charts(
     it = set(includes.title_tokens)
     is_kw = set(includes.summary_tokens)
     ib = set(includes.summary_buckets)
+    icat = set(includes.include_categories)
+    ico = set(includes.include_companies)
+    it_exact = set(includes.include_titles_exact)
     out: list[dict[str, Any]] = []
     for j in jobs:
         if not jobs_api_row_matches_search(j, q):
@@ -313,6 +325,16 @@ def filter_jobs_api_list_with_charts(
             b = bucket_summary_word_count(wc)
             if b not in ib:
                 continue
+        if icat:
+            cat = str(j.get("category") or "").strip() or categorize_title(title)
+            if cat not in icat:
+                continue
+        if ico:
+            if _company_key(j) not in ico:
+                continue
+        if it_exact:
+            if title not in it_exact:
+                continue
         out.append(j)
     return out
 
@@ -321,6 +343,9 @@ def filter_career_list_with_charts(rows: list[dict[str, Any]], includes: ChartIn
     it = set(includes.title_tokens)
     is_kw = set(includes.summary_tokens)
     ib = set(includes.summary_buckets)
+    icat = set(includes.include_categories)
+    ico = set(includes.include_companies)
+    it_exact = set(includes.include_titles_exact)
     out: list[dict[str, Any]] = []
     for j in rows:
         title = str(j.get("title") or "")
@@ -335,6 +360,16 @@ def filter_career_list_with_charts(rows: list[dict[str, Any]], includes: ChartIn
             wc = len(text.split()) if text else 0
             b = bucket_summary_word_count(wc)
             if b not in ib:
+                continue
+        if icat:
+            cat = str(j.get("category") or "").strip() or categorize_title(title)
+            if cat not in icat:
+                continue
+        if ico:
+            if _company_key(j) not in ico:
+                continue
+        if it_exact:
+            if title not in it_exact:
                 continue
         out.append(j)
     return out
@@ -558,7 +593,14 @@ def build_top_n_pie_figure(
     pie_rows: list[dict[str, Any]] = []
     for _, r in vc.head(top_n).iterrows():
         v = str(r["value"])
-        pie_rows.append({"label": truncate(v, label_max), "count": int(r["count"]), "hover": v})
+        pie_rows.append(
+            {
+                "label": truncate(v, label_max),
+                "count": int(r["count"]),
+                "hover": v,
+                "match": v,
+            }
+        )
     if n_distinct > top_n:
         rest = vc.iloc[top_n:]
         other_count = int(rest["count"].sum())
@@ -569,6 +611,7 @@ def build_top_n_pie_figure(
                 "label": f"Other ({n_other} {other_noun})",
                 "count": other_count,
                 "hover": f"{n_other} distinct {other_noun} not in top {top_n} ({other_count} job rows)",
+                "match": "",
             }
         )
     pie_df = pd.DataFrame(pie_rows)
@@ -581,13 +624,14 @@ def build_top_n_pie_figure(
     counts = pie_df["count"].astype(int).tolist()
     hovers = pie_df["hover"].astype(str).tolist()
     pcts = pie_df["pct"].tolist()
+    matches = pie_df["match"].astype(str).tolist()
     n = len(labels)
     fig = go.Figure(
         data=go.Bar(
             x=counts,
             y=labels,
             orientation="h",
-            customdata=list(zip(hovers, pcts, strict=True)),
+            customdata=list(zip(hovers, pcts, matches, strict=True)),
             marker=dict(
                 color=counts,
                 colorscale="Teal",

@@ -22,10 +22,12 @@ function Fig({
   fig,
   onSelected,
   onDeselect,
+  onClick,
 }: {
   fig: Record<string, unknown> | null | undefined
   onSelected?: (e: Readonly<Record<string, unknown>>) => void
   onDeselect?: () => void
+  onClick?: (e: Readonly<Record<string, unknown>>) => void
 }) {
   if (!fig || !Array.isArray(fig.data)) {
     return <p className="muted">Nothing to chart.</p>
@@ -43,6 +45,7 @@ function Fig({
       config={{ displayModeBar: true, responsive: true }}
       onSelected={onSelected as (e: Readonly<Record<string, unknown>>) => void}
       onDeselect={onDeselect}
+      onClick={onClick as (e: Readonly<Record<string, unknown>>) => void}
     />
   )
 }
@@ -57,6 +60,20 @@ function tokensFromVertBar(e: Readonly<Record<string, unknown>> | null): string[
   if (!e || !Array.isArray((e as { points?: unknown[] }).points)) return []
   const pts = (e as { points: { x?: string; label?: string }[] }).points
   return [...new Set(pts.map((p) => String(p.x ?? p.label ?? '').trim()).filter(Boolean))]
+}
+
+/** Category / company / title bars: filter key is customdata[2] (full value; empty = “Other” aggregate, not selectable). */
+function matchKeysFromFacetBar(e: Readonly<Record<string, unknown>> | null): string[] {
+  if (!e || !Array.isArray((e as { points?: unknown[] }).points)) return []
+  const pts = (e as { points: { customdata?: unknown }[] }).points
+  const keys: string[] = []
+  for (const p of pts) {
+    const cd = p.customdata
+    if (Array.isArray(cd) && cd.length > 2 && cd[2] != null && String(cd[2]).trim().length > 0) {
+      keys.push(String(cd[2]).trim())
+    }
+  }
+  return [...new Set(keys)]
 }
 
 function truncate(s: string, n: number) {
@@ -462,12 +479,18 @@ function JobsPanel({
   const rows = jobsData.jobs_visible as Record<string, string>[]
 
   const hasInc =
-    inc.title_tokens.length + inc.summary_tokens.length + inc.summary_buckets.length > 0
+    inc.title_tokens.length +
+      inc.summary_tokens.length +
+      inc.summary_buckets.length +
+      inc.include_categories.length +
+      inc.include_companies.length +
+      inc.include_titles_exact.length >
+    0
 
   return (
     <>
       <p className="hint">
-        Window from feed dates. Use charts to narrow rows (OR within a chart, AND across charts).{' '}
+        Window from feed dates. Click a bar or box-select to narrow rows (OR within a chart, AND across charts). Distributions and the table update together.{' '}
         {!jobsData.has_fetched_jobs && 'Load listings with Refresh jobs in the sidebar.'}
       </p>
       <label className="search">
@@ -475,16 +498,20 @@ function JobsPanel({
         <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
       </label>
 
-      {hasInc && (
-        <div className="incpanel">
-          <strong>Chart includes</strong>
-          <button type="button" className="small" onClick={() => setInc(emptyIncludes())}>
-            Clear chart includes
-          </button>
+      <div className="incpanel">
+        <strong>Chart includes</strong>
+        <button type="button" className="small" disabled={!hasInc} onClick={() => setInc(emptyIncludes())}>
+          Clear all chart includes
+        </button>
+        {!hasInc ? (
+          <p className="hint small" style={{ margin: '0.35rem 0 0' }}>
+            None — use the charts below to filter.
+          </p>
+        ) : (
           <ul>
             {inc.title_tokens.map((t) => (
               <li key={`t-${t}`}>
-                Title: {t}{' '}
+                Title word: {t}{' '}
                 <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, title_tokens: p.title_tokens.filter((x) => x !== t) }))}>
                   ×
                 </button>
@@ -492,7 +519,7 @@ function JobsPanel({
             ))}
             {inc.summary_tokens.map((t) => (
               <li key={`s-${t}`}>
-                Summary: {t}{' '}
+                Summary word: {t}{' '}
                 <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, summary_tokens: p.summary_tokens.filter((x) => x !== t) }))}>
                   ×
                 </button>
@@ -506,10 +533,125 @@ function JobsPanel({
                 </button>
               </li>
             ))}
+            {inc.include_categories.map((t) => (
+              <li key={`cat-${t}`}>
+                Category: {truncate(t, 56)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_categories: p.include_categories.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
+            {inc.include_companies.map((t) => (
+              <li key={`co-${t}`}>
+                Company: {truncate(t, 40)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_companies: p.include_companies.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
+            {inc.include_titles_exact.map((t) => (
+              <li key={`tit-${t}`}>
+                Title (exact): {truncate(t, 56)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_titles_exact: p.include_titles_exact.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
 
+      <h3>Distributions</h3>
+      <h4 className="chart-h">Title keywords</h4>
+      <p className="hint small">Click a bar or drag to box-select. Deselect clears this chart’s filter.</p>
+      <Fig
+        fig={charts.title_keywords}
+        onClick={(e) => {
+          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+          if (t.length) setInc((p) => ({ ...p, title_tokens: t }))
+        }}
+        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
+      />
+      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
+        Clear title keyword includes
+      </button>
+
+      <details className="exp">
+        <summary>Job summary distribution</summary>
+        <h4>Summary length</h4>
+        <Fig
+          fig={charts.summary_length}
+          onClick={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: t }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
+          Clear length includes
+        </button>
+        <h4>Summary keywords</h4>
+        <Fig
+          fig={charts.summary_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: t }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
+          Clear summary keyword includes
+        </button>
+      </details>
+
+      <details className="exp">
+        <summary>Category / company / title (top values)</summary>
+        <p className="hint small">Click or box-select a bar. “Other” is not a filter (aggregate only).</p>
+        <h4>Category</h4>
+        <Fig
+          fig={charts.pie_category}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_categories: keys }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, include_categories: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, include_categories: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_categories: [] }))}>
+          Clear category includes
+        </button>
+        <h4>Company</h4>
+        <Fig
+          fig={charts.pie_company}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_companies: keys }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, include_companies: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, include_companies: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_companies: [] }))}>
+          Clear company includes
+        </button>
+        <h4>Title</h4>
+        <Fig
+          fig={charts.pie_title}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_titles_exact: keys }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, include_titles_exact: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}>
+          Clear title (exact) includes
+        </button>
+      </details>
+
+      <h3>Results</h3>
       <div className="metrics">
         <div>
           <span className="n">{m.fetched}</span>
@@ -610,49 +752,6 @@ function JobsPanel({
           </table>
         </div>
       )}
-
-      <h3>Title keyword distribution</h3>
-      <p className="hint small">Select bars to filter (Plotly box/lasso). Deselect to clear this chart.</p>
-      <Fig
-        fig={charts.title_keywords}
-        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
-        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
-      />
-      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
-        Clear title chart includes
-      </button>
-
-      <details className="exp">
-        <summary>Job summary distribution</summary>
-        <h4>Summary length</h4>
-        <Fig
-          fig={charts.summary_length}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
-          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
-          Clear length includes
-        </button>
-        <h4>Summary keywords</h4>
-        <Fig
-          fig={charts.summary_keywords}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
-          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
-          Clear summary keyword includes
-        </button>
-      </details>
-
-      <details className="exp">
-        <summary>Category / company / title (top values)</summary>
-        <h4>Category</h4>
-        <Fig fig={charts.pie_category} />
-        <h4>Company</h4>
-        <Fig fig={charts.pie_company} />
-        <h4>Title</h4>
-        <Fig fig={charts.pie_title} />
-      </details>
     </>
   )
 }
@@ -682,11 +781,19 @@ function CareerPanel({
   const notes = careerData.notes as string[]
 
   const hasInc =
-    inc.title_tokens.length + inc.summary_tokens.length + inc.summary_buckets.length > 0
+    inc.title_tokens.length +
+      inc.summary_tokens.length +
+      inc.summary_buckets.length +
+      inc.include_categories.length +
+      inc.include_companies.length +
+      inc.include_titles_exact.length >
+    0
 
   return (
     <>
-      <p className="hint">Roles from configured career APIs. Newest first where dates exist.</p>
+      <p className="hint">
+        Roles from configured career APIs. Newest first where dates exist. Click a bar or box-select to filter; distributions and the table update together.
+      </p>
       <button type="button" className="primary" disabled={busy || !careerSel.length} onClick={() => onRefresh()}>
         Refresh career listings
       </button>
@@ -697,16 +804,20 @@ function CareerPanel({
       ))}
       {notes?.length ? <p className="muted small">{notes.join(' · ')}</p> : null}
 
-      {hasInc && (
-        <div className="incpanel">
-          <strong>Chart includes</strong>
-          <button type="button" className="small" onClick={() => setInc(emptyIncludes())}>
-            Clear chart includes
-          </button>
+      <div className="incpanel">
+        <strong>Chart includes</strong>
+        <button type="button" className="small" disabled={!hasInc} onClick={() => setInc(emptyIncludes())}>
+          Clear all chart includes
+        </button>
+        {!hasInc ? (
+          <p className="hint small" style={{ margin: '0.35rem 0 0' }}>
+            None — use the charts below to filter.
+          </p>
+        ) : (
           <ul>
             {inc.title_tokens.map((t) => (
               <li key={`t-${t}`}>
-                Title: {t}{' '}
+                Title word: {t}{' '}
                 <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, title_tokens: p.title_tokens.filter((x) => x !== t) }))}>
                   ×
                 </button>
@@ -714,7 +825,7 @@ function CareerPanel({
             ))}
             {inc.summary_tokens.map((t) => (
               <li key={`s-${t}`}>
-                Summary: {t}{' '}
+                Summary word: {t}{' '}
                 <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, summary_tokens: p.summary_tokens.filter((x) => x !== t) }))}>
                   ×
                 </button>
@@ -728,9 +839,81 @@ function CareerPanel({
                 </button>
               </li>
             ))}
+            {inc.include_categories.map((t) => (
+              <li key={`cat-${t}`}>
+                Category: {truncate(t, 56)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_categories: p.include_categories.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
+            {inc.include_companies.map((t) => (
+              <li key={`co-${t}`}>
+                Company: {truncate(t, 40)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_companies: p.include_companies.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
+            {inc.include_titles_exact.map((t) => (
+              <li key={`tit-${t}`}>
+                Title (exact): {truncate(t, 56)}{' '}
+                <button type="button" className="linkish" onClick={() => setInc((p) => ({ ...p, include_titles_exact: p.include_titles_exact.filter((x) => x !== t) }))}>
+                  ×
+                </button>
+              </li>
+            ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
+
+      <h3>Distributions</h3>
+      <h4 className="chart-h">Title keywords</h4>
+      <p className="hint small">Click a bar or drag to box-select.</p>
+      <Fig
+        fig={charts.title_keywords}
+        onClick={(e) => {
+          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+          if (t.length) setInc((p) => ({ ...p, title_tokens: t }))
+        }}
+        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
+      />
+      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
+        Clear title keyword includes
+      </button>
+
+      <details className="exp">
+        <summary>Job summary distribution</summary>
+        <h4>Summary length</h4>
+        <Fig
+          fig={charts.summary_length}
+          onClick={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: t }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
+          Clear length includes
+        </button>
+        <h4>Summary keywords</h4>
+        <Fig
+          fig={charts.summary_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: t }))
+          }}
+          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
+          Clear summary keyword includes
+        </button>
+      </details>
+
+      <h3>Results</h3>
 
       {!careerSel.length ? (
         <p className="info">Select companies in the sidebar.</p>
@@ -789,38 +972,6 @@ function CareerPanel({
           </table>
         </div>
       )}
-
-      <h3>Title keyword distribution</h3>
-      <Fig
-        fig={charts.title_keywords}
-        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
-        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
-      />
-      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
-        Clear title chart includes
-      </button>
-
-      <details className="exp">
-        <summary>Job summary distribution</summary>
-        <h4>Summary length</h4>
-        <Fig
-          fig={charts.summary_length}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
-          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
-          Clear length includes
-        </button>
-        <h4>Summary keywords</h4>
-        <Fig
-          fig={charts.summary_keywords}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
-          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
-          Clear summary keyword includes
-        </button>
-      </details>
     </>
   )
 }

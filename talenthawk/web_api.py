@@ -209,12 +209,18 @@ class ChartIncludesModel(BaseModel):
     title_tokens: list[str] = Field(default_factory=list)
     summary_tokens: list[str] = Field(default_factory=list)
     summary_buckets: list[str] = Field(default_factory=list)
+    include_categories: list[str] = Field(default_factory=list)
+    include_companies: list[str] = Field(default_factory=list)
+    include_titles_exact: list[str] = Field(default_factory=list)
 
     def to_core(self) -> ChartIncludes:
         return ChartIncludes(
             title_tokens=list(self.title_tokens),
             summary_tokens=list(self.summary_tokens),
             summary_buckets=list(self.summary_buckets),
+            include_categories=list(self.include_categories),
+            include_companies=list(self.include_companies),
+            include_titles_exact=list(self.include_titles_exact),
         )
 
 
