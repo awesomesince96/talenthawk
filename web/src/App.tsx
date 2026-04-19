@@ -62,6 +62,11 @@ function tokensFromVertBar(e: Readonly<Record<string, unknown>> | null): string[
   return [...new Set(pts.map((p) => String(p.x ?? p.label ?? '').trim()).filter(Boolean))]
 }
 
+function mergeIncludes(existing: string[], incoming: string[]): string[] {
+  if (!incoming.length) return existing
+  return [...new Set([...existing, ...incoming])]
+}
+
 /** Category / company / title bars: filter key is customdata[2] (full value; empty = “Other” aggregate, not selectable). */
 function matchKeysFromFacetBar(e: Readonly<Record<string, unknown>> | null): string[] {
   if (!e || !Array.isArray((e as { points?: unknown[] }).points)) return []
@@ -490,7 +495,7 @@ function JobsPanel({
   return (
     <>
       <p className="hint">
-        Window from feed dates. Click a bar or box-select to narrow rows (OR within a chart, AND across charts). Distributions and the table update together.{' '}
+        Window from feed dates. Click or box-select bars to add includes (OR within each chart, AND across charts). Distributions and the table update together.{' '}
         {!jobsData.has_fetched_jobs && 'Load listings with Refresh jobs in the sidebar.'}
       </p>
       <label className="search">
@@ -563,14 +568,18 @@ function JobsPanel({
 
       <h3>Distributions</h3>
       <h4 className="chart-h">Title keywords</h4>
-      <p className="hint small">Click a bar or drag to box-select. Deselect clears this chart’s filter.</p>
+      <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR). Deselect clears this chart’s filter.</p>
       <Fig
         fig={charts.title_keywords}
         onClick={(e) => {
           const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (t.length) setInc((p) => ({ ...p, title_tokens: t }))
+          if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
         }}
-        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+        onSelected={(e) => {
+          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+          if (!t.length) return
+          setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+        }}
         onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
       />
       <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
@@ -584,9 +593,13 @@ function JobsPanel({
           fig={charts.summary_length}
           onClick={(e) => {
             const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_buckets: t }))
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
@@ -597,9 +610,13 @@ function JobsPanel({
           fig={charts.summary_keywords}
           onClick={(e) => {
             const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_tokens: t }))
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
@@ -615,9 +632,13 @@ function JobsPanel({
           fig={charts.pie_category}
           onClick={(e) => {
             const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_categories: keys }))
+            if (keys.length) setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, include_categories: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, include_categories: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_categories: [] }))}>
@@ -628,9 +649,13 @@ function JobsPanel({
           fig={charts.pie_company}
           onClick={(e) => {
             const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_companies: keys }))
+            if (keys.length) setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, include_companies: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, include_companies: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_companies: [] }))}>
@@ -641,9 +666,13 @@ function JobsPanel({
           fig={charts.pie_title}
           onClick={(e) => {
             const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_titles_exact: keys }))
+            if (keys.length) setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, include_titles_exact: matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}>
@@ -792,7 +821,7 @@ function CareerPanel({
   return (
     <>
       <p className="hint">
-        Roles from configured career APIs. Newest first where dates exist. Click a bar or box-select to filter; distributions and the table update together.
+        Roles from configured career APIs. Newest first where dates exist. Click or box-select to add includes; distributions and the table update together.
       </p>
       <button type="button" className="primary" disabled={busy || !careerSel.length} onClick={() => onRefresh()}>
         Refresh career listings
@@ -869,14 +898,18 @@ function CareerPanel({
 
       <h3>Distributions</h3>
       <h4 className="chart-h">Title keywords</h4>
-      <p className="hint small">Click a bar or drag to box-select.</p>
+      <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR).</p>
       <Fig
         fig={charts.title_keywords}
         onClick={(e) => {
           const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (t.length) setInc((p) => ({ ...p, title_tokens: t }))
+          if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
         }}
-        onSelected={(e) => setInc((p) => ({ ...p, title_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+        onSelected={(e) => {
+          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+          if (!t.length) return
+          setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+        }}
         onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
       />
       <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
@@ -890,9 +923,13 @@ function CareerPanel({
           fig={charts.summary_length}
           onClick={(e) => {
             const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_buckets: t }))
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_buckets: tokensFromVertBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
@@ -903,9 +940,13 @@ function CareerPanel({
           fig={charts.summary_keywords}
           onClick={(e) => {
             const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_tokens: t }))
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
           }}
-          onSelected={(e) => setInc((p) => ({ ...p, summary_tokens: tokensFromHorizBar(e as Readonly<Record<string, unknown>>) }))}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
           onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
         />
         <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
