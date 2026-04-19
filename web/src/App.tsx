@@ -645,7 +645,7 @@ function JobsPanel({
       </details>
 
       <details className="exp">
-        <summary>Category / company / title pies</summary>
+        <summary>Category / company / title (top values)</summary>
         <h4>Category</h4>
         <Fig fig={charts.pie_category} />
         <h4>Company</h4>

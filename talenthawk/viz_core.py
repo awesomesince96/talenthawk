@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 
 from talenthawk.categorize import categorize_title
@@ -366,6 +365,64 @@ def figure_to_dict(fig: go.Figure) -> dict[str, Any]:
     return json.loads(fig.to_json())
 
 
+_DIST_BASE_LAYOUT: dict[str, Any] = {
+    "template": "plotly_white",
+    "font": {
+        "family": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "size": 12,
+        "color": "#1e293b",
+    },
+    "paper_bgcolor": "#f8fafc",
+    "plot_bgcolor": "#f8fafc",
+}
+
+
+def _finish_hbar_distribution(
+    fig: go.Figure,
+    *,
+    xaxis_title: str,
+    height: int,
+    margin_bottom: int = 52,
+) -> dict[str, Any]:
+    fig.update_layout(
+        **_DIST_BASE_LAYOUT,
+        height=height,
+        margin=dict(l=8, r=28, t=16, b=margin_bottom),
+        xaxis_title=xaxis_title,
+        yaxis=dict(title=""),
+        showlegend=False,
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(15, 23, 42, 0.08)", zeroline=False)
+    fig.update_yaxes(showgrid=False)
+    return figure_to_dict(fig)
+
+
+def _finish_vbar_distribution(
+    fig: go.Figure,
+    *,
+    yaxis_title: str,
+    height: int = 340,
+    margin_bottom: int = 72,
+    x_tickangle: int = -32,
+) -> dict[str, Any]:
+    fig.update_layout(
+        **_DIST_BASE_LAYOUT,
+        height=height,
+        margin=dict(l=48, r=16, t=16, b=margin_bottom),
+        xaxis_title="",
+        yaxis_title=yaxis_title,
+        showlegend=False,
+        xaxis_tickangle=x_tickangle,
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(15, 23, 42, 0.08)", zeroline=False)
+    return figure_to_dict(fig)
+
+
+# One color per summary-length bucket (ordered light → strong by typical length).
+_SUMMARY_LEN_BAR_COLORS = ("#94a3b8", "#7dd3fc", "#38bdf8", "#0284c7", "#0c4a6e")
+
+
 def build_title_keyword_figure(
     company_title_rows: list[tuple[str, str]],
     *,
@@ -386,7 +443,16 @@ def build_title_keyword_figure(
             y=words_y,
             orientation="h",
             customdata=hover_bodies,
-            marker=dict(color=cnts, colorscale="Viridis", showscale=False),
+            marker=dict(
+                color=cnts,
+                colorscale="Teal",
+                showscale=False,
+                line=dict(width=0),
+            ),
+            text=[str(c) for c in cnts],
+            textposition="outside",
+            textfont=dict(size=11, color="#475569"),
+            cliponaxis=False,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "<b>%{x}</b> row(s)<br><br>"
@@ -394,14 +460,11 @@ def build_title_keyword_figure(
             ),
         )
     )
-    fig.update_layout(
-        height=max(300, min(900, 36 * len(words_y) + 120)),
-        margin=dict(l=8, r=8, t=12, b=48),
+    return _finish_hbar_distribution(
+        fig,
         xaxis_title="Rows (title contains word)",
-        yaxis=dict(title=""),
-        showlegend=False,
+        height=max(300, min(900, 36 * len(words_y) + 140)),
     )
-    return figure_to_dict(fig)
 
 
 def build_summary_length_figure(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -415,22 +478,23 @@ def build_summary_length_figure(jobs: list[dict[str, Any]]) -> dict[str, Any] | 
     y = [counts[k] for k in x]
     if sum(y) == 0:
         return None
+    total = sum(y)
+    pct = [round(100 * v / total, 1) if total else 0.0 for v in y]
+    colors = [_SUMMARY_LEN_BAR_COLORS[i % len(_SUMMARY_LEN_BAR_COLORS)] for i in range(len(x))]
     fig = go.Figure(
         data=go.Bar(
             x=x,
             y=y,
-            marker=dict(color=y, colorscale="Blues", showscale=False),
+            marker=dict(color=colors, line=dict(width=0)),
+            customdata=[[p] for p in pct],
+            text=[f"{v}<br>({p}%)" if v else "" for v, p in zip(y, pct, strict=True)],
+            textposition="outside",
+            textfont=dict(size=11, color="#475569"),
+            cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Jobs: %{y}<br>%{customdata[0]:.1f}% of shown<extra></extra>",
         )
     )
-    fig.update_layout(
-        height=320,
-        margin=dict(l=8, r=8, t=12, b=80),
-        xaxis_title="",
-        yaxis_title="Jobs",
-        showlegend=False,
-        xaxis_tickangle=-28,
-    )
-    return figure_to_dict(fig)
+    return _finish_vbar_distribution(fig, yaxis_title="Jobs")
 
 
 def build_summary_keyword_figure(
@@ -453,7 +517,16 @@ def build_summary_keyword_figure(
             y=words_y,
             orientation="h",
             customdata=hover_bodies,
-            marker=dict(color=cnts, colorscale="Cividis", showscale=False),
+            marker=dict(
+                color=cnts,
+                colorscale="PuBu",
+                showscale=False,
+                line=dict(width=0),
+            ),
+            text=[str(c) for c in cnts],
+            textposition="outside",
+            textfont=dict(size=11, color="#475569"),
+            cliponaxis=False,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "<b>%{x}</b> row(s)<br><br>"
@@ -461,14 +534,11 @@ def build_summary_keyword_figure(
             ),
         )
     )
-    fig.update_layout(
-        height=max(300, min(900, 36 * len(words_y) + 120)),
-        margin=dict(l=8, r=8, t=12, b=48),
+    return _finish_hbar_distribution(
+        fig,
         xaxis_title="Rows (summary contains word)",
-        yaxis=dict(title=""),
-        showlegend=False,
+        height=max(300, min(900, 36 * len(words_y) + 140)),
     )
-    return figure_to_dict(fig)
 
 
 def build_top_n_pie_figure(
@@ -502,24 +572,49 @@ def build_top_n_pie_figure(
             }
         )
     pie_df = pd.DataFrame(pie_rows)
-    fig = px.pie(
-        pie_df,
-        names="label",
-        values="count",
-        color_discrete_sequence=px.colors.qualitative.Set2,
-    )
-    fig.update_traces(
-        textinfo="label+percent",
-        textposition="auto",
-        insidetextorientation="radial",
-        hovertemplate="<b>%{customdata}</b><br>Jobs: %{value}<br>%{percent}<extra></extra>",
-        customdata=pie_df["hover"],
+    total_jobs = int(pie_df["count"].sum())
+    if total_jobs <= 0:
+        return None
+    pie_df = pie_df.assign(pct=(pie_df["count"] / total_jobs * 100).map(lambda v: round(float(v), 1)))
+    pie_df = pie_df.sort_values("count", ascending=True)
+    labels = pie_df["label"].astype(str).tolist()
+    counts = pie_df["count"].astype(int).tolist()
+    hovers = pie_df["hover"].astype(str).tolist()
+    pcts = pie_df["pct"].tolist()
+    n = len(labels)
+    fig = go.Figure(
+        data=go.Bar(
+            x=counts,
+            y=labels,
+            orientation="h",
+            customdata=list(zip(hovers, pcts, strict=True)),
+            marker=dict(
+                color=counts,
+                colorscale="Teal",
+                showscale=False,
+                line=dict(width=0),
+            ),
+            text=[f"{c} ({p}%)" for c, p in zip(counts, pcts, strict=True)],
+            textposition="outside",
+            textfont=dict(size=11, color="#475569"),
+            cliponaxis=False,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Jobs: %{x}<br>"
+                "%{customdata[1]:.1f}% of shown rows<extra></extra>"
+            ),
+        )
     )
     fig.update_layout(
-        showlegend=True,
-        legend=dict(orientation="v", yanchor="middle", y=0.5, font=dict(size=11)),
-        margin=dict(l=10, r=10, t=30, b=10),
+        **_DIST_BASE_LAYOUT,
+        height=max(280, min(760, 28 * n + 120)),
+        margin=dict(l=8, r=36, t=16, b=48),
+        xaxis_title="Jobs",
+        yaxis=dict(title="", automargin=True),
+        showlegend=False,
     )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(15, 23, 42, 0.08)", zeroline=False)
+    fig.update_yaxes(showgrid=False, automargin=True)
     return figure_to_dict(fig)
 
 
