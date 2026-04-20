@@ -99,6 +99,28 @@ def gather_job_description_text(job: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def gather_primary_job_body_text(job: dict[str, Any]) -> str:
+    """
+    Main posting body only (role description), without qualification bullets.
+
+    ``preferred_qualifications`` / ``basic_qualifications`` often repeat the same legal
+    and policy paragraphs across many listings on one employer site; including them in
+    token counts makes unrelated words tie at the maximum frequency.
+    """
+    parts: list[str] = []
+    for key in ("description",):
+        v = job.get(key)
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    raw = job.get("raw")
+    if isinstance(raw, dict):
+        for key in ("description", "description_html", "job_description"):
+            v = raw.get(key)
+            if isinstance(v, str) and v.strip():
+                parts.append(v)
+    return "\n".join(parts)
+
+
 def job_summary_plain_text(job: dict[str, Any]) -> str:
     """
     Plain text for analytics: prefer a short teaser when present (e.g. ``description_short``
@@ -112,6 +134,25 @@ def job_summary_plain_text(job: dict[str, Any]) -> str:
             return _prepare_text(ds)
     blob = gather_job_description_text(job)
     return _prepare_text(blob)
+
+
+def job_posting_plain_text_for_word_stats(job: dict[str, Any]) -> str:
+    """
+    Plain text for keyword charts, length buckets, and summary-token filters.
+
+    Prefer :func:`gather_primary_job_body_text` (main JD only). Identical ``description_short``
+    teasers and repeated legal blocks in qualification fields inflated per-token counts.
+    If the primary body is shorter than ~12 words, use the full gather (including
+    qualifications), then :func:`job_summary_plain_text`.
+    """
+    primary = _prepare_text(gather_primary_job_body_text(job))
+    if len(primary.split()) >= 12:
+        return primary
+    blob = gather_job_description_text(job)
+    full = _prepare_text(blob)
+    if full.strip():
+        return full
+    return job_summary_plain_text(job)
 
 
 def salary_display_for_api_job(job: dict[str, Any]) -> str:

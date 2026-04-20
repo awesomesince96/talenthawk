@@ -67,6 +67,37 @@ function mergeIncludes(existing: string[], incoming: string[]): string[] {
   return [...new Set([...existing, ...incoming])]
 }
 
+type KeywordRow = { word: string; count: number }
+
+function KeywordCountTable({ rows, label }: { rows: KeywordRow[]; label: string }) {
+  if (!rows.length) {
+    return <p className="muted small">No tokens in the current row set.</p>
+  }
+  return (
+    <div className="kw-all">
+      <table>
+        <caption>
+          {label} <span className="muted">({rows.length} distinct)</span>
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Word</th>
+            <th scope="col">Rows</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.word}>
+              <td>{r.word}</td>
+              <td className="num">{r.count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 /** Category / company / title bars: filter key is customdata[2] (full value; empty = “Other” aggregate, not selectable). */
 function matchKeysFromFacetBar(e: Readonly<Record<string, unknown>> | null): string[] {
   if (!e || !Array.isArray((e as { points?: unknown[] }).points)) return []
@@ -482,6 +513,10 @@ function JobsPanel({
   const m = jobsData.metrics
   const charts = jobsData.charts
   const rows = jobsData.jobs_visible as Record<string, string>[]
+  const kwLists = (jobsData as { keyword_lists?: { title: KeywordRow[]; summary: KeywordRow[] } }).keyword_lists ?? {
+    title: [] as KeywordRow[],
+    summary: [] as KeywordRow[],
+  }
 
   const hasInc =
     inc.title_tokens.length +
@@ -495,7 +530,7 @@ function JobsPanel({
   return (
     <>
       <p className="hint">
-        Window from feed dates. Click or box-select bars to add includes (OR within each chart, AND across charts). Distributions and the table update together.{' '}
+        Window from feed dates. Results are listed first; expand Title keywords and Job summary for charts and full word lists. Click or box-select to add includes (OR within each chart, AND across charts).{' '}
         {!jobsData.has_fetched_jobs && 'Load listings with Refresh jobs in the sidebar.'}
       </p>
       <label className="search">
@@ -510,7 +545,7 @@ function JobsPanel({
         </button>
         {!hasInc ? (
           <p className="hint small" style={{ margin: '0.35rem 0 0' }}>
-            None — use the charts below to filter.
+            None — expand Title keywords / Job summary below and select bars to filter.
           </p>
         ) : (
           <ul>
@@ -565,120 +600,6 @@ function JobsPanel({
           </ul>
         )}
       </div>
-
-      <h3>Distributions</h3>
-      <h4 className="chart-h">Title keywords</h4>
-      <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR). Deselect clears this chart’s filter.</p>
-      <Fig
-        fig={charts.title_keywords}
-        onClick={(e) => {
-          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
-        }}
-        onSelected={(e) => {
-          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (!t.length) return
-          setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
-        }}
-        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
-      />
-      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
-        Clear title keyword includes
-      </button>
-
-      <details className="exp">
-        <summary>Job summary distribution</summary>
-        <h4>Summary length</h4>
-        <Fig
-          fig={charts.summary_length}
-          onClick={(e) => {
-            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
-          }}
-          onSelected={(e) => {
-            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (!t.length) return
-            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
-          Clear length includes
-        </button>
-        <h4>Summary keywords</h4>
-        <Fig
-          fig={charts.summary_keywords}
-          onClick={(e) => {
-            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
-          }}
-          onSelected={(e) => {
-            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (!t.length) return
-            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
-          Clear summary keyword includes
-        </button>
-      </details>
-
-      <details className="exp">
-        <summary>Category / company / title (top values)</summary>
-        <p className="hint small">Click or box-select a bar. “Other” is not a filter (aggregate only).</p>
-        <h4>Category</h4>
-        <Fig
-          fig={charts.pie_category}
-          onClick={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
-          }}
-          onSelected={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (!keys.length) return
-            setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, include_categories: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_categories: [] }))}>
-          Clear category includes
-        </button>
-        <h4>Company</h4>
-        <Fig
-          fig={charts.pie_company}
-          onClick={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
-          }}
-          onSelected={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (!keys.length) return
-            setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, include_companies: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_companies: [] }))}>
-          Clear company includes
-        </button>
-        <h4>Title</h4>
-        <Fig
-          fig={charts.pie_title}
-          onClick={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (keys.length) setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
-          }}
-          onSelected={(e) => {
-            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
-            if (!keys.length) return
-            setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}>
-          Clear title (exact) includes
-        </button>
-      </details>
 
       <h3>Results</h3>
       <div className="metrics">
@@ -781,6 +702,128 @@ function JobsPanel({
           </table>
         </div>
       )}
+
+      <details className="exp" open>
+        <summary>Title keywords — distribution &amp; full list</summary>
+        <h4 className="chart-h">Top title keywords (chart)</h4>
+        <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR). Deselect clears this chart’s filter.</p>
+        <Fig
+          fig={charts.title_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
+          Clear title keyword includes
+        </button>
+        <h4 className="chart-h">All title keywords</h4>
+        <p className="hint small">Every distinct token in job titles for rows in Results (stopwords removed).</p>
+        <KeywordCountTable rows={kwLists.title} label="Title tokens" />
+      </details>
+
+      <details className="exp" open>
+        <summary>Job summary — length, keywords &amp; full list</summary>
+        <h4>Summary length</h4>
+        <Fig
+          fig={charts.summary_length}
+          onClick={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
+          Clear length includes
+        </button>
+        <h4 className="chart-h">Top summary keywords (chart)</h4>
+        <Fig
+          fig={charts.summary_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
+          Clear summary keyword includes
+        </button>
+        <h4 className="chart-h">All summary / description keywords</h4>
+        <p className="hint small">Every distinct token in posting body text for rows in Results (same source as charts; stopwords removed).</p>
+        <KeywordCountTable rows={kwLists.summary} label="Body tokens" />
+      </details>
+
+      <details className="exp">
+        <summary>Category / company / title (top values)</summary>
+        <p className="hint small">Click or box-select a bar. “Other” is not a filter (aggregate only).</p>
+        <h4>Category</h4>
+        <Fig
+          fig={charts.pie_category}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
+          }}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_categories: mergeIncludes(p.include_categories, keys) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, include_categories: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_categories: [] }))}>
+          Clear category includes
+        </button>
+        <h4>Company</h4>
+        <Fig
+          fig={charts.pie_company}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
+          }}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_companies: mergeIncludes(p.include_companies, keys) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, include_companies: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_companies: [] }))}>
+          Clear company includes
+        </button>
+        <h4>Title</h4>
+        <Fig
+          fig={charts.pie_title}
+          onClick={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (keys.length) setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
+          }}
+          onSelected={(e) => {
+            const keys = matchKeysFromFacetBar(e as Readonly<Record<string, unknown>>)
+            if (!keys.length) return
+            setInc((p) => ({ ...p, include_titles_exact: mergeIncludes(p.include_titles_exact, keys) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, include_titles_exact: [] }))}>
+          Clear title (exact) includes
+        </button>
+      </details>
     </>
   )
 }
@@ -808,6 +851,10 @@ function CareerPanel({
   const display = (careerData.rows_display ?? []) as Record<string, string>[]
   const errs = careerData.errs as string[]
   const notes = careerData.notes as string[]
+  const kwLists = (careerData as { keyword_lists?: { title: KeywordRow[]; summary: KeywordRow[] } }).keyword_lists ?? {
+    title: [] as KeywordRow[],
+    summary: [] as KeywordRow[],
+  }
 
   const hasInc =
     inc.title_tokens.length +
@@ -821,7 +868,7 @@ function CareerPanel({
   return (
     <>
       <p className="hint">
-        Roles from configured career APIs. Newest first where dates exist. Click or box-select to add includes; distributions and the table update together.
+        Roles from configured career APIs. Newest first where dates exist. Results are listed first; expand Title keywords and Job summary for charts and full word lists. Click or box-select to add includes.
       </p>
       <button type="button" className="primary" disabled={busy || !careerSel.length} onClick={() => onRefresh()}>
         Refresh career listings
@@ -840,7 +887,7 @@ function CareerPanel({
         </button>
         {!hasInc ? (
           <p className="hint small" style={{ margin: '0.35rem 0 0' }}>
-            None — use the charts below to filter.
+            None — expand Title keywords / Job summary below and select bars to filter.
           </p>
         ) : (
           <ul>
@@ -895,64 +942,6 @@ function CareerPanel({
           </ul>
         )}
       </div>
-
-      <h3>Distributions</h3>
-      <h4 className="chart-h">Title keywords</h4>
-      <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR).</p>
-      <Fig
-        fig={charts.title_keywords}
-        onClick={(e) => {
-          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
-        }}
-        onSelected={(e) => {
-          const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-          if (!t.length) return
-          setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
-        }}
-        onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
-      />
-      <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
-        Clear title keyword includes
-      </button>
-
-      <details className="exp">
-        <summary>Job summary distribution</summary>
-        <h4>Summary length</h4>
-        <Fig
-          fig={charts.summary_length}
-          onClick={(e) => {
-            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
-          }}
-          onSelected={(e) => {
-            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
-            if (!t.length) return
-            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
-          Clear length includes
-        </button>
-        <h4>Summary keywords</h4>
-        <Fig
-          fig={charts.summary_keywords}
-          onClick={(e) => {
-            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
-          }}
-          onSelected={(e) => {
-            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
-            if (!t.length) return
-            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
-          }}
-          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
-        />
-        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
-          Clear summary keyword includes
-        </button>
-      </details>
 
       <h3>Results</h3>
 
@@ -1013,6 +1002,72 @@ function CareerPanel({
           </table>
         </div>
       )}
+
+      <details className="exp" open>
+        <summary>Title keywords — distribution &amp; full list</summary>
+        <h4 className="chart-h">Top title keywords (chart)</h4>
+        <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR).</p>
+        <Fig
+          fig={charts.title_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, title_tokens: mergeIncludes(p.title_tokens, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, title_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, title_tokens: [] }))}>
+          Clear title keyword includes
+        </button>
+        <h4 className="chart-h">All title keywords</h4>
+        <p className="hint small">Every distinct token in job titles for rows in Results (stopwords removed).</p>
+        <KeywordCountTable rows={kwLists.title} label="Title tokens" />
+      </details>
+
+      <details className="exp" open>
+        <summary>Job summary — length, keywords &amp; full list</summary>
+        <h4>Summary length</h4>
+        <Fig
+          fig={charts.summary_length}
+          onClick={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromVertBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_buckets: mergeIncludes(p.summary_buckets, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, summary_buckets: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_buckets: [] }))}>
+          Clear length includes
+        </button>
+        <h4 className="chart-h">Top summary keywords (chart)</h4>
+        <Fig
+          fig={charts.summary_keywords}
+          onClick={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (t.length) setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
+          onSelected={(e) => {
+            const t = tokensFromHorizBar(e as Readonly<Record<string, unknown>>)
+            if (!t.length) return
+            setInc((p) => ({ ...p, summary_tokens: mergeIncludes(p.summary_tokens, t) }))
+          }}
+          onDeselect={() => setInc((p) => ({ ...p, summary_tokens: [] }))}
+        />
+        <button type="button" className="small" onClick={() => setInc((p) => ({ ...p, summary_tokens: [] }))}>
+          Clear summary keyword includes
+        </button>
+        <h4 className="chart-h">All summary / description keywords</h4>
+        <p className="hint small">Every distinct token in posting body text for rows in Results (same source as charts; stopwords removed).</p>
+        <KeywordCountTable rows={kwLists.summary} label="Body tokens" />
+      </details>
     </>
   )
 }

@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 from talenthawk.categorize import categorize_title
 from talenthawk.fetch_jobs import filter_last_n_days, matches_text_filter
 from talenthawk.salary_parse import (
-    job_summary_plain_text,
+    job_posting_plain_text_for_word_stats,
     salary_display_for_api_job,
     salary_display_for_career_row,
 )
@@ -241,7 +241,7 @@ def summary_word_index(company_title_rows_from_jobs: list[dict[str, Any]]) -> di
     for j in company_title_rows_from_jobs:
         company = (j.get("company") or "").strip() or "—"
         title = (j.get("title") or "").strip() or "—"
-        text = job_summary_plain_text(j)
+        text = job_posting_plain_text_for_word_stats(j)
         seen: set[str] = set()
         for w in tokenize_summary_words(text):
             if w in seen:
@@ -317,10 +317,10 @@ def filter_jobs_api_list_with_charts(
             if set(tokenize_title_words(title)).isdisjoint(it):
                 continue
         if is_kw:
-            if set(tokenize_summary_words(job_summary_plain_text(j))).isdisjoint(is_kw):
+            if set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j))).isdisjoint(is_kw):
                 continue
         if ib:
-            text = job_summary_plain_text(j)
+            text = job_posting_plain_text_for_word_stats(j)
             wc = len(text.split()) if text else 0
             b = bucket_summary_word_count(wc)
             if b not in ib:
@@ -353,10 +353,10 @@ def filter_career_list_with_charts(rows: list[dict[str, Any]], includes: ChartIn
             if set(tokenize_title_words(title)).isdisjoint(it):
                 continue
         if is_kw:
-            if set(tokenize_summary_words(job_summary_plain_text(j))).isdisjoint(is_kw):
+            if set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j))).isdisjoint(is_kw):
                 continue
         if ib:
-            text = job_summary_plain_text(j)
+            text = job_posting_plain_text_for_word_stats(j)
             wc = len(text.split()) if text else 0
             b = bucket_summary_word_count(wc)
             if b not in ib:
@@ -458,6 +458,24 @@ def _finish_vbar_distribution(
 _SUMMARY_LEN_BAR_COLORS = ("#94a3b8", "#7dd3fc", "#38bdf8", "#0284c7", "#0c4a6e")
 
 
+def title_keyword_records(company_title_rows: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    """All distinct title tokens with row counts (sorted by count desc, then word)."""
+    idx = word_to_company_title_index(company_title_rows)
+    if not idx:
+        return []
+    ranked = sorted(idx.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    return [{"word": w, "count": len(rows)} for w, rows in ranked]
+
+
+def summary_keyword_records(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """All distinct summary/body tokens with row counts (sorted by count desc, then word)."""
+    idx = summary_word_index(jobs)
+    if not idx:
+        return []
+    ranked = sorted(idx.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    return [{"word": w, "count": len(rows)} for w, rows in ranked]
+
+
 def build_title_keyword_figure(
     company_title_rows: list[tuple[str, str]],
     *,
@@ -505,7 +523,7 @@ def build_title_keyword_figure(
 def build_summary_length_figure(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
     counts: dict[str, int] = {k: 0 for k in SUMMARY_LEN_BUCKET_ORDER}
     for j in jobs:
-        text = job_summary_plain_text(j)
+        text = job_posting_plain_text_for_word_stats(j)
         wc = len(text.split()) if text else 0
         b = bucket_summary_word_count(wc)
         counts[b] = counts[b] + 1
@@ -694,17 +712,17 @@ def compute_jobs_api_bundle(
     sum_len_fig = None
     sum_kw_fig = None
     pie_cat = pie_co = pie_title = None
+    company_title_for_kw: list[tuple[str, str]] = []
     if not df_show.empty:
-        title_kw_fig = build_title_keyword_figure(
-            [
-                (str(c).strip() or "—", str(t))
-                for c, t in zip(
-                    df_show["company"].fillna("").astype(str),
-                    df_show["title"].fillna("").astype(str),
-                    strict=True,
-                )
-            ],
-        )
+        company_title_for_kw = [
+            (str(c).strip() or "—", str(t))
+            for c, t in zip(
+                df_show["company"].fillna("").astype(str),
+                df_show["title"].fillna("").astype(str),
+                strict=True,
+            )
+        ]
+        title_kw_fig = build_title_keyword_figure(company_title_for_kw)
         sum_len_fig = build_summary_length_figure(jobs_visible)
         sum_kw_fig = build_summary_keyword_figure(jobs_visible)
         pie_cat = build_top_n_pie_figure(df_show, "category")
@@ -733,6 +751,10 @@ def compute_jobs_api_bundle(
             "pie_company": pie_co,
             "pie_title": pie_title,
         },
+        "keyword_lists": {
+            "title": title_keyword_records(company_title_for_kw),
+            "summary": summary_keyword_records(jobs_visible),
+        },
     }
 
 
@@ -751,15 +773,14 @@ def compute_career_bundle(
         if job_is_included(r, title_filters, company_filters, category_filters, title_ignore_words)
     ]
     filtered = filter_career_list_with_charts(visible, chart_includes)
-    title_kw_fig = build_title_keyword_figure(
-        [
-            (
-                str(r.get("company", "") or "").strip() or "—",
-                str(r.get("title", "") or ""),
-            )
-            for r in filtered
-        ],
-    )
+    company_title_for_kw = [
+        (
+            str(r.get("company", "") or "").strip() or "—",
+            str(r.get("title", "") or ""),
+        )
+        for r in filtered
+    ]
+    title_kw_fig = build_title_keyword_figure(company_title_for_kw)
     sum_len_fig = build_summary_length_figure(filtered)
     sum_kw_fig = build_summary_keyword_figure(filtered)
     return {
@@ -770,6 +791,10 @@ def compute_career_bundle(
             "title_keywords": title_kw_fig,
             "summary_length": sum_len_fig,
             "summary_keywords": sum_kw_fig,
+        },
+        "keyword_lists": {
+            "title": title_keyword_records(company_title_for_kw),
+            "summary": summary_keyword_records(filtered),
         },
     }
 

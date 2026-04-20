@@ -236,3 +236,48 @@ details summary {
   font-weight: 500;
   margin: 0.35rem 0;
 }
+
+.kw-all {
+  margin: 0.5rem 0 0;
+  max-height: min(28rem, 55vh);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.kw-all table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.kw-all caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.kw-all th,
+.kw-all td {
+  padding: 0.2rem 0.55rem;
+}
+
+.kw-all th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+.kw-all td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-h {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.95rem;
+}
