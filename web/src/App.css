@@ -277,6 +277,12 @@ details summary {
   font-variant-numeric: tabular-nums;
 }
 
+.kw-all td.kw-inc {
+  width: 3rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
 .chart-h {
   margin: 0.75rem 0 0.25rem;
   font-size: 0.95rem;

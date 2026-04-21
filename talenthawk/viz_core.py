@@ -31,7 +31,6 @@ MAX_CATEGORY_LEN = 22
 TITLE_DIST_TOP_N = 25
 TITLE_DIST_CHART_MAX = 56
 TITLE_KEYWORD_DIST_TOP_N = 28
-SUMMARY_KEYWORD_DIST_TOP_N = 24
 
 SUMMARY_LEN_BUCKET_ORDER = (
     "No summary text",
@@ -432,32 +431,6 @@ def _finish_hbar_distribution(
     return figure_to_dict(fig)
 
 
-def _finish_vbar_distribution(
-    fig: go.Figure,
-    *,
-    yaxis_title: str,
-    height: int = 340,
-    margin_bottom: int = 72,
-    x_tickangle: int = -32,
-) -> dict[str, Any]:
-    fig.update_layout(
-        **_DIST_BASE_LAYOUT,
-        height=height,
-        margin=dict(l=48, r=16, t=16, b=margin_bottom),
-        xaxis_title="",
-        yaxis_title=yaxis_title,
-        showlegend=False,
-        xaxis_tickangle=x_tickangle,
-    )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(15, 23, 42, 0.08)", zeroline=False)
-    return figure_to_dict(fig)
-
-
-# One color per summary-length bucket (ordered light → strong by typical length).
-_SUMMARY_LEN_BAR_COLORS = ("#94a3b8", "#7dd3fc", "#38bdf8", "#0284c7", "#0c4a6e")
-
-
 def title_keyword_records(company_title_rows: list[tuple[str, str]]) -> list[dict[str, Any]]:
     """All distinct title tokens with row counts (sorted by count desc, then word)."""
     idx = word_to_company_title_index(company_title_rows)
@@ -516,80 +489,6 @@ def build_title_keyword_figure(
     return _finish_hbar_distribution(
         fig,
         xaxis_title="Rows (title contains word)",
-        height=max(300, min(900, 36 * len(words_y) + 140)),
-    )
-
-
-def build_summary_length_figure(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    counts: dict[str, int] = {k: 0 for k in SUMMARY_LEN_BUCKET_ORDER}
-    for j in jobs:
-        text = job_posting_plain_text_for_word_stats(j)
-        wc = len(text.split()) if text else 0
-        b = bucket_summary_word_count(wc)
-        counts[b] = counts[b] + 1
-    x = list(SUMMARY_LEN_BUCKET_ORDER)
-    y = [counts[k] for k in x]
-    if sum(y) == 0:
-        return None
-    total = sum(y)
-    pct = [round(100 * v / total, 1) if total else 0.0 for v in y]
-    colors = [_SUMMARY_LEN_BAR_COLORS[i % len(_SUMMARY_LEN_BAR_COLORS)] for i in range(len(x))]
-    fig = go.Figure(
-        data=go.Bar(
-            x=x,
-            y=y,
-            marker=dict(color=colors, line=dict(width=0)),
-            customdata=[[p] for p in pct],
-            text=[f"{v}<br>({p}%)" if v else "" for v, p in zip(y, pct, strict=True)],
-            textposition="outside",
-            textfont=dict(size=11, color="#475569"),
-            cliponaxis=False,
-            hovertemplate="<b>%{x}</b><br>Jobs: %{y}<br>%{customdata[0]:.1f}% of shown<extra></extra>",
-        )
-    )
-    return _finish_vbar_distribution(fig, yaxis_title="Jobs")
-
-
-def build_summary_keyword_figure(
-    jobs: list[dict[str, Any]],
-    *,
-    top_n: int = SUMMARY_KEYWORD_DIST_TOP_N,
-) -> dict[str, Any] | None:
-    idx = summary_word_index(jobs)
-    if not idx:
-        return None
-    ranked = sorted(idx.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:top_n]
-    ranked_bar = list(reversed(ranked))
-    words_y = [w for w, _ in ranked_bar]
-    cnts = [len(idx[w]) for w in words_y]
-    hover_bodies = ["<br>".join(hover_company_title_line(co, ti) for co, ti in idx[w]) for w in words_y]
-
-    fig = go.Figure(
-        data=go.Bar(
-            x=cnts,
-            y=words_y,
-            orientation="h",
-            customdata=hover_bodies,
-            marker=dict(
-                color=cnts,
-                colorscale="PuBu",
-                showscale=False,
-                line=dict(width=0),
-            ),
-            text=[str(c) for c in cnts],
-            textposition="outside",
-            textfont=dict(size=11, color="#475569"),
-            cliponaxis=False,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "<b>%{x}</b> row(s)<br><br>"
-                "%{customdata}<extra></extra>"
-            ),
-        )
-    )
-    return _finish_hbar_distribution(
-        fig,
-        xaxis_title="Rows (summary contains word)",
         height=max(300, min(900, 36 * len(words_y) + 140)),
     )
 
@@ -709,8 +608,6 @@ def compute_jobs_api_bundle(
     df_show = pd.DataFrame(jobs_visible)
 
     title_kw_fig = None
-    sum_len_fig = None
-    sum_kw_fig = None
     pie_cat = pie_co = pie_title = None
     company_title_for_kw: list[tuple[str, str]] = []
     if not df_show.empty:
@@ -723,8 +620,6 @@ def compute_jobs_api_bundle(
             )
         ]
         title_kw_fig = build_title_keyword_figure(company_title_for_kw)
-        sum_len_fig = build_summary_length_figure(jobs_visible)
-        sum_kw_fig = build_summary_keyword_figure(jobs_visible)
         pie_cat = build_top_n_pie_figure(df_show, "category")
         pie_co = build_top_n_pie_figure(df_show, "company")
         pie_title = build_top_n_pie_figure(df_show, "title")
@@ -745,8 +640,6 @@ def compute_jobs_api_bundle(
         },
         "charts": {
             "title_keywords": title_kw_fig,
-            "summary_length": sum_len_fig,
-            "summary_keywords": sum_kw_fig,
             "pie_category": pie_cat,
             "pie_company": pie_co,
             "pie_title": pie_title,
@@ -781,16 +674,12 @@ def compute_career_bundle(
         for r in filtered
     ]
     title_kw_fig = build_title_keyword_figure(company_title_for_kw)
-    sum_len_fig = build_summary_length_figure(filtered)
-    sum_kw_fig = build_summary_keyword_figure(filtered)
     return {
         "visible_pre_chart": visible,
         "rows": filtered,
         "total_loaded": len(career_rows),
         "charts": {
             "title_keywords": title_kw_fig,
-            "summary_length": sum_len_fig,
-            "summary_keywords": sum_kw_fig,
         },
         "keyword_lists": {
             "title": title_keyword_records(company_title_for_kw),
