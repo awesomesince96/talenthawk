@@ -6,7 +6,9 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -179,6 +181,47 @@ def _normalize_serpapi_job(j: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _serpapi_redact_secrets(message: str) -> str:
+    """Avoid echoing API keys in error text (httpx includes request URLs)."""
+    s = str(message)
+    for k in (os.environ.get("SERPAPI_API_KEY", ""), os.environ.get("SERPAPI_KEY", "")):
+        kk = (k or "").strip()
+        if len(kk) > 6:
+            s = s.replace(kk, "…")
+    return s
+
+
+def _serpapi_get_with_429_retry(
+    client: httpx.Client,
+    url: str,
+    params: dict[str, str],
+    *,
+    max_attempts: int = 7,
+) -> httpx.Response:
+    """GET with retry on HTTP 429 (exponential backoff; honors Retry-After up to 120s)."""
+    back = 1.0
+    for attempt in range(max_attempts):
+        r = client.get(url, params=params)
+        if r.status_code != 429:
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise RuntimeError(_serpapi_redact_secrets(str(e))) from e
+            return r
+        if attempt + 1 >= max_attempts:
+            raise RuntimeError(
+                "SerpAPI rate limited (HTTP 429) after several retries. "
+                "Wait a few minutes, refresh fewer companies at once, or add direct career fetchers to reduce API calls."
+            )
+        ra = (r.headers.get("retry-after") or r.headers.get("Retry-After") or "").strip()
+        if ra.isdigit():
+            time.sleep(min(int(ra), 120))
+        else:
+            time.sleep(min(back, 60.0))
+            back = min(back * 2, 60.0)
+    raise RuntimeError("SerpAPI: unexpected retry loop end")
+
+
 def _serpapi_google_jobs_no_listings_message(message: str) -> bool:
     """
     SerpAPI sets ``error`` when Google Jobs returns zero hits for the query.
@@ -227,8 +270,9 @@ def fetch_serpapi_google_jobs(
                 params["chips"] = ch
             if token:
                 params["next_page_token"] = token
-            r = client.get(SERPAPI_SEARCH_URL, params=params)
-            r.raise_for_status()
+            r = _serpapi_get_with_429_retry(
+                client, SERPAPI_SEARCH_URL, {k: str(v) for k, v in params.items()}
+            )
             data = r.json()
             if not isinstance(data, dict):
                 break

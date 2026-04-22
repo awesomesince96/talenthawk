@@ -131,11 +131,10 @@
       "id": "coupang",
       "display_name": "Coupang",
       "careers_list_url": "https://www.coupang.jobs/",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Coupang software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "coupang"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "coupang",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "stubhub",
@@ -150,11 +149,10 @@
       "id": "roblox",
       "display_name": "Roblox",
       "careers_list_url": "https://careers.roblox.com/",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Roblox software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "roblox"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "roblox",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "airtable",
@@ -181,18 +179,17 @@
       "fetcher": "serpapi_careers",
       "serpapi_query": "LinkedIn software engineer",
       "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
+      "serpapi_max_pages": 3,
       "serpapi_company_substring": "linkedin"
     },
     {
       "id": "waymo",
       "display_name": "Waymo",
       "careers_list_url": "https://waymo.com/careers/",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Waymo software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "waymo"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "waymo",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     }
   ]
 }
