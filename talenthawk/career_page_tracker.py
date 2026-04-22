@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -885,6 +885,118 @@ def fetch_jobs_for_company(
     return fn(entry, display, company_id, timeout)
 
 
+def iter_career_refresh_events(
+    company_ids: list[str],
+    *,
+    out: dict[str, Any] | None = None,
+    timeout: float = 90.0,
+    force_refresh: bool = False,
+    use_cache: bool = True,
+    allow_network: bool = True,
+    cache_ttl_seconds: int = DEFAULT_TTL_SECONDS,
+) -> Iterator[dict[str, Any]]:
+    """
+    Yields small JSON-serializable events for each company, then a final ``complete`` event.
+    If ``out`` is provided, sets ``out["rows"]``, ``out["errors"]``, ``out["notes"]`` before
+    the final yield (and includes the same in ``complete``).
+
+    Event shape (``phase`` is concise for UIs)::
+
+        { "id", "name", "phase": "start" }           # this company is up next / starting
+        { "id", "name", "phase": "work" }            # network request in progress
+        { "id", "name", "phase": "cache", "jobs": n }
+        { "id", "name", "phase": "done", "jobs": n }
+        { "id", "name", "phase": "error", "err": s }  # not in mappings or failed
+        { "id", "name", "phase": "skip" }            # e.g. allow_network=False, cache miss
+        { "phase": "complete", "total_jobs", "errors", "notes" }
+    """
+    store = out if out is not None else {}
+    mappings = load_career_page_mappings()
+    merged: list[dict[str, Any]] = []
+    errors: list[str] = []
+    notes: list[str] = []
+    valid_ids = {str(c.get("id", "")).strip() for c in mappings.get("companies", []) if isinstance(c, dict)}
+
+    for cid in company_ids:
+        c = str(cid).strip()
+        if not c:
+            continue
+        if c not in valid_ids:
+            em = f"{c}: not in career_page_mappings.json"
+            errors.append(em)
+            yield {
+                "id": c,
+                "name": c,
+                "phase": "error",
+                "err": "not in career_page_mappings.json",
+            }
+            continue
+        entry = mapping_entry_for_company(c, mappings=mappings)
+        if not entry:
+            em = f"{c}: not in career_page_mappings.json"
+            errors.append(em)
+            yield {
+                "id": c,
+                "name": c,
+                "phase": "error",
+                "err": "not in career_page_mappings.json",
+            }
+            continue
+        fp = career_entry_fingerprint(entry)
+        label = str(entry.get("display_name") or c).strip() or c
+        yield {"id": c, "name": label, "phase": "start"}
+
+        if use_cache and not force_refresh:
+            cached = read_career_company_cache(c, expected_fingerprint=fp, ttl_seconds=cache_ttl_seconds)
+            if cached is not None:
+                n = len(cached)
+                merged.extend(cached)
+                notes.append(f"{label} (cache)")
+                yield {"id": c, "name": label, "phase": "cache", "jobs": n}
+                continue
+
+        if not allow_network:
+            yield {"id": c, "name": label, "phase": "skip"}
+            continue
+
+        yield {"id": c, "name": label, "phase": "work"}
+        try:
+            batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
+            if not batch:
+                em = f"{c}: no roles returned (API change or empty results)"
+                errors.append(em)
+                yield {
+                    "id": c,
+                    "name": label,
+                    "phase": "error",
+                    "err": "no roles returned (API change or empty results)",
+                }
+            else:
+                merged.extend(batch)
+                write_career_company_cache(
+                    c,
+                    batch,
+                    config_fingerprint=fp,
+                    source=str(batch[0].get("source") or "career_page") if batch else "career_page",
+                )
+                notes.append(f"{label} (fetch)")
+                yield {"id": c, "name": label, "phase": "done", "jobs": len(batch)}
+        except Exception as e:
+            errors.append(f"{c}: {e}")
+            yield {"id": c, "name": label, "phase": "error", "err": str(e)}
+
+    rows = sort_career_jobs_by_created_desc(merged)
+    store["rows"] = rows
+    store["errors"] = errors
+    store["notes"] = notes
+    yield {
+        "phase": "complete",
+        "total_jobs": len(rows),
+        "errors": list(errors),
+        "notes": list(notes),
+    }
+
+
 def fetch_tracked_career_jobs(
     company_ids: list[str],
     *,
@@ -905,48 +1017,15 @@ def fetch_tracked_career_jobs(
     Returns ``(jobs, errors, cache_notes)`` where ``cache_notes`` are short lines like
     ``uber (cache)`` or ``google (fetch)``.
     """
-    mappings = load_career_page_mappings()
-    merged: list[dict[str, Any]] = []
-    errors: list[str] = []
-    notes: list[str] = []
-    valid_ids = {str(c.get("id", "")).strip() for c in mappings.get("companies", []) if isinstance(c, dict)}
-    for cid in company_ids:
-        c = str(cid).strip()
-        if not c:
-            continue
-        if c not in valid_ids:
-            errors.append(f"{c}: not in career_page_mappings.json")
-            continue
-        entry = mapping_entry_for_company(c, mappings=mappings)
-        if not entry:
-            errors.append(f"{c}: not in career_page_mappings.json")
-            continue
-        fp = career_entry_fingerprint(entry)
-        label = str(entry.get("display_name") or c).strip() or c
-
-        if use_cache and not force_refresh:
-            cached = read_career_company_cache(c, expected_fingerprint=fp, ttl_seconds=cache_ttl_seconds)
-            if cached is not None:
-                merged.extend(cached)
-                notes.append(f"{label} (cache)")
-                continue
-
-        if not allow_network:
-            continue
-
-        try:
-            batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
-            if not batch:
-                errors.append(f"{c}: no roles returned (API change or empty results)")
-            else:
-                merged.extend(batch)
-                write_career_company_cache(
-                    c,
-                    batch,
-                    config_fingerprint=fp,
-                    source=str(batch[0].get("source") or "career_page") if batch else "career_page",
-                )
-                notes.append(f"{label} (fetch)")
-        except Exception as e:
-            errors.append(f"{c}: {e}")
-    return sort_career_jobs_by_created_desc(merged), errors, notes
+    out: dict[str, Any] = {}
+    for _ in iter_career_refresh_events(
+        company_ids,
+        out=out,
+        timeout=timeout,
+        force_refresh=force_refresh,
+        use_cache=use_cache,
+        allow_network=allow_network,
+        cache_ttl_seconds=cache_ttl_seconds,
+    ):
+        pass
+    return out["rows"], out["errors"], out["notes"]

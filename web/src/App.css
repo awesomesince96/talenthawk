@@ -287,3 +287,40 @@ details summary {
   margin: 0.75rem 0 0.25rem;
   font-size: 0.95rem;
 }
+
+.career-progress {
+  margin: 0.5rem 0 0.75rem;
+  max-width: min(28rem, 100%);
+  font-size: 0.8rem;
+}
+
+.career-progress table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.career-progress th,
+.career-progress td {
+  text-align: left;
+  padding: 0.15rem 0.4rem 0.15rem 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.career-progress th {
+  font-weight: 500;
+  color: var(--text-h);
+  font-size: 0.75rem;
+  font-family: var(--sans);
+}
+
+.career-prog-st {
+  word-break: break-word;
+  color: var(--text-h);
+  opacity: 0.95;
+}
+
+.career-prog-foot {
+  margin: 0.4rem 0 0;
+}

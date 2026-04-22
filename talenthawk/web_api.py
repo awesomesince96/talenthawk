@@ -4,6 +4,7 @@ FastAPI server for the React dashboard. Replaces ``streamlit_app.py``.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,12 +13,16 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from talenthawk.career_page_tracker import fetch_tracked_career_jobs, sort_career_jobs_by_created_desc
+from talenthawk.career_page_tracker import (
+    fetch_tracked_career_jobs,
+    iter_career_refresh_events,
+    sort_career_jobs_by_created_desc,
+)
 from talenthawk.fetch_jobs import fetch_jobs_feed, matches_text_filter, parse_title_ignore_words_input
 from talenthawk.job_cache import (
     DEFAULT_TTL_SECONDS,
@@ -246,6 +251,7 @@ class RefreshJobsRequest(BaseModel):
 class RefreshCareerRequest(BaseModel):
     company_ids: list[str]
     bypass_cache: bool = False
+    stream: bool = False
 
 
 class SaveTitleIgnoreRequest(BaseModel):
@@ -337,10 +343,38 @@ def refresh_jobs(body: RefreshJobsRequest) -> dict[str, Any]:
 
 
 @app.post("/api/career/refresh")
-def refresh_career(body: RefreshCareerRequest) -> dict[str, Any]:
+def refresh_career(body: RefreshCareerRequest) -> Any:
     if not body.company_ids:
         raise HTTPException(status_code=400, detail="Select at least one company")
     sel = [str(x).strip() for x in body.company_ids if str(x).strip()]
+
+    if body.stream:
+        out: dict[str, Any] = {}
+
+        def sse() -> Any:
+            for ev in iter_career_refresh_events(
+                sel,
+                out=out,
+                force_refresh=body.bypass_cache,
+                use_cache=not body.bypass_cache,
+            ):
+                line = f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                yield line.encode("utf-8")
+            jobs = out.get("rows", [])
+            errs = out.get("errors", [])
+            notes = out.get("notes", [])
+            STATE.career_tracker_rows = list(jobs)
+            STATE.career_tracker_errs = list(errs)
+            STATE.career_cache_notes = list(notes)
+            STATE.career_tracker_selection = sel
+            save_career_tracker_filter(sel)
+
+        return StreamingResponse(
+            sse(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     jobs, errs, notes = fetch_tracked_career_jobs(
         sel,
         force_refresh=body.bypass_cache,

@@ -5,18 +5,38 @@ import {
   deleteFilter,
   emptyIncludes,
   getBootstrap,
-  postCareerRefresh,
+  postCareerRefreshStream,
   postCareerView,
   postJobsRefresh,
   postJobsView,
   postCareerSelection,
   postTitleIgnore,
+  type CareerProgressEvent,
   type ChartIncludes,
 } from './api'
 import { Plot } from './plotlySetup'
 import './App.css'
 
 type Bootstrap = Awaited<ReturnType<typeof getBootstrap>>
+
+function statusFromCareerEvent(e: CareerProgressEvent): string {
+  switch (e.phase) {
+    case 'start':
+      return 'sent'
+    case 'work':
+      return 'fetching'
+    case 'cache':
+      return `received · ${e.jobs ?? 0} (cache)`
+    case 'done':
+      return `received · ${e.jobs ?? 0}`
+    case 'error':
+      return `error · ${(e.err || '').slice(0, 200)}`
+    case 'skip':
+      return 'skipped (no network)'
+    default:
+      return '—'
+  }
+}
 
 function Fig({
   fig,
@@ -153,6 +173,10 @@ export default function App() {
   const [careerData, setCareerData] = useState<Awaited<ReturnType<typeof postCareerView>> | null>(null)
 
   const [busy, setBusy] = useState(false)
+  const [careerProgress, setCareerProgress] = useState<{
+    rows: { id: string; name: string; status: string }[]
+    summary?: string
+  } | null>(null)
 
   const reloadBootstrap = useCallback(async () => {
     const b = await getBootstrap()
@@ -475,15 +499,51 @@ export default function App() {
           <CareerPanel
             careerData={careerData}
             careerSel={careerSel}
+            careerProgress={careerProgress}
             busy={busy}
             onRefresh={async () => {
               setBusy(true)
+              setErr(null)
+              setCareerProgress({
+                rows: careerSel.map((id) => ({
+                  id,
+                  name: boot.career_companies.find((c: { id: string; label: string }) => c.id === id)?.label || id,
+                  status: '·',
+                })),
+              })
               try {
-                await postCareerRefresh({ company_ids: careerSel, bypass_cache: careerBypass })
+                await postCareerRefreshStream(
+                  { company_ids: careerSel, bypass_cache: careerBypass },
+                  (e) => {
+                    if (e.phase === 'complete') {
+                      setCareerProgress((p) =>
+                        p
+                          ? {
+                              ...p,
+                              summary: `All done · ${e.total_jobs ?? 0} jobs in table`,
+                            }
+                          : null,
+                      )
+                      return
+                    }
+                    if (!e.id) return
+                    const st = statusFromCareerEvent(e)
+                    setCareerProgress((p) => {
+                      if (!p) return p
+                      return {
+                        ...p,
+                        rows: p.rows.map((r) =>
+                          r.id === e.id ? { ...r, name: e.name?.trim() || r.name, status: st } : r,
+                        ),
+                      }
+                    })
+                  },
+                )
                 await reloadBootstrap()
                 await loadCareerView()
               } catch (e) {
                 setErr(String(e))
+                setCareerProgress(null)
               } finally {
                 setBusy(false)
               }
@@ -819,6 +879,7 @@ function JobsPanel({
 function CareerPanel({
   careerData,
   careerSel,
+  careerProgress,
   busy,
   onRefresh,
   inc,
@@ -828,6 +889,7 @@ function CareerPanel({
 }: {
   careerData: Awaited<ReturnType<typeof postCareerView>>
   careerSel: string[]
+  careerProgress: { rows: { id: string; name: string; status: string }[]; summary?: string } | null
   busy: boolean
   onRefresh: () => Promise<void>
   inc: ChartIncludes
@@ -861,6 +923,27 @@ function CareerPanel({
       <button type="button" className="primary" disabled={busy || !careerSel.length} onClick={() => onRefresh()}>
         Refresh career listings
       </button>
+      {careerProgress?.rows.length ? (
+        <div className="career-progress" aria-live="polite">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {careerProgress.rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="career-prog-name">{truncate(r.name, 28)}</td>
+                  <td className="career-prog-st">{r.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {careerProgress.summary ? <p className="muted small career-prog-foot">{careerProgress.summary}</p> : null}
+        </div>
+      ) : null}
       {errs?.map((e) => (
         <p key={e} className="warn">
           {e}

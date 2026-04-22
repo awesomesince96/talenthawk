@@ -48,7 +48,22 @@ export async function postJobsRefresh(body: {
   )
 }
 
-export async function postCareerRefresh(body: { company_ids: string[]; bypass_cache: boolean }) {
+export type CareerProgressEvent = {
+  id?: string
+  name?: string
+  phase?: string
+  jobs?: number
+  err?: string
+  total_jobs?: number
+  errors?: string[]
+  notes?: string[]
+}
+
+export async function postCareerRefresh(body: {
+  company_ids: string[]
+  bypass_cache: boolean
+  stream?: boolean
+}) {
   return json(
     await fetch('/api/career/refresh', {
       method: 'POST',
@@ -56,6 +71,58 @@ export async function postCareerRefresh(body: { company_ids: string[]; bypass_ca
       body: JSON.stringify(body),
     }),
   )
+}
+
+/**
+ * Server-Sent Events over POST. Calls onEvent for each `data: {...}` line, then resolves when the stream ends.
+ */
+export async function postCareerRefreshStream(
+  body: { company_ids: string[]; bypass_cache: boolean },
+  onEvent: (e: CareerProgressEvent) => void,
+): Promise<void> {
+  const res = await fetch('/api/career/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, stream: true }),
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  if (!res.body) throw new Error('No response body')
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let i: number
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, i)
+      buf = buf.slice(i + 2)
+      for (const line of block.split('\n')) {
+        const m = line.match(/^data:\s*(.+)/)
+        if (m) {
+          try {
+            onEvent(JSON.parse(m[1]) as CareerProgressEvent)
+          } catch {
+            // ignore bad chunk
+          }
+        }
+      }
+    }
+  }
+  const tail = buf.trim()
+  if (tail) {
+    for (const line of tail.split('\n')) {
+      const m = line.match(/^data:\s*(.+)/)
+      if (m) {
+        try {
+          onEvent(JSON.parse(m[1]) as CareerProgressEvent)
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 }
 
 export async function postCareerSelection(company_ids: string[]) {
