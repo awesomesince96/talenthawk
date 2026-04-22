@@ -113,21 +113,19 @@
       "id": "janestreet",
       "display_name": "Jane Street",
       "careers_list_url": "https://www.janestreet.com/join-jss/",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Jane Street software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "jane street"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "janestreet",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "samsara",
       "display_name": "Samsara",
       "careers_list_url": "https://www.samsara.com/company/careers",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Samsara software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "samsara"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "samsara",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "coupang",
@@ -143,11 +141,10 @@
       "id": "stubhub",
       "display_name": "StubHub",
       "careers_list_url": "https://careers.stubhub.com/",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "StubHub software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "stubhub"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "stubhubinc",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "roblox",
@@ -163,21 +160,19 @@
       "id": "airtable",
       "display_name": "Airtable",
       "careers_list_url": "https://airtable.com/careers",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Airtable software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "airtable"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "airtable",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "twitch",
       "display_name": "Twitch",
       "careers_list_url": "https://www.twitch.tv/jobs",
-      "fetcher": "serpapi_careers",
-      "serpapi_query": "Twitch software engineer",
-      "serpapi_location": "United States",
-      "serpapi_max_pages": 5,
-      "serpapi_company_substring": "twitch"
+      "fetcher": "greenhouse_board",
+      "greenhouse_board": "twitch",
+      "greenhouse_usa_only": true,
+      "greenhouse_title_substring": "engineer, developer, sde"
     },
     {
       "id": "linkedin",

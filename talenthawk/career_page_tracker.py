@@ -23,6 +23,7 @@ NETFLIX_EIGHTFOLD_JOBS_URL = "https://netflix.eightfold.ai/api/apply/v2/jobs"
 MICROSOFT_PCSX_SEARCH_URL = "https://apply.careers.microsoft.com/api/pcsx/search"
 MICROSOFT_JOB_BASE_URL = "https://apply.careers.microsoft.com"
 AMAZON_JOBS_SEARCH_URL = "https://www.amazon.jobs/en/search"
+GREENHOUSE_BOARDS_API_BASE = "https://boards-api.greenhouse.io/v1/boards"
 
 FetcherFn = Callable[[dict[str, Any], str, str, float], list[dict[str, Any]]]
 
@@ -525,6 +526,163 @@ def fetch_via_amazon_jobs(
     return picked
 
 
+def _greenhouse_location_short(j: dict[str, Any]) -> str:
+    loc = j.get("location")
+    if isinstance(loc, dict):
+        name = str(loc.get("name") or "").strip()
+        if name:
+            return name[:220]
+    return ""
+
+
+def _greenhouse_location_is_usa(j: dict[str, Any]) -> bool:
+    loc = _greenhouse_location_short(j).lower()
+    if not loc:
+        return False
+    us_state_codes = {
+        "al",
+        "ak",
+        "az",
+        "ar",
+        "ca",
+        "co",
+        "ct",
+        "de",
+        "fl",
+        "ga",
+        "hi",
+        "id",
+        "il",
+        "in",
+        "ia",
+        "ks",
+        "ky",
+        "la",
+        "me",
+        "md",
+        "ma",
+        "mi",
+        "mn",
+        "ms",
+        "mo",
+        "mt",
+        "ne",
+        "nv",
+        "nh",
+        "nj",
+        "nm",
+        "ny",
+        "nc",
+        "nd",
+        "oh",
+        "ok",
+        "or",
+        "pa",
+        "ri",
+        "sc",
+        "sd",
+        "tn",
+        "tx",
+        "ut",
+        "vt",
+        "va",
+        "wa",
+        "wv",
+        "wi",
+        "wy",
+        "dc",
+    }
+    usa_needles = (
+        "united states",
+        " u.s.",
+        " us ",
+        ", usa",
+        " us-remote",
+        "remote - us",
+        "remote, us",
+    )
+    if any(n in f" {loc} " for n in usa_needles):
+        return True
+    tail = loc.split(",")[-1].strip().replace(".", "")
+    if tail in us_state_codes:
+        return True
+    if "remote" in loc and "canada" not in loc and "europe" not in loc:
+        return True
+    return False
+
+
+def _greenhouse_title_passes(j: dict[str, Any], entry: dict[str, Any]) -> bool:
+    title = str(j.get("title") or "").strip().lower()
+    needles_raw = str(entry.get("greenhouse_title_substring") or "").strip()
+    if not needles_raw:
+        return True
+    needles = [x.strip().lower() for x in needles_raw.split(",") if x.strip()]
+    if not needles:
+        return True
+    return any(n in title for n in needles)
+
+
+def _normalize_greenhouse_job(
+    j: dict[str, Any],
+    *,
+    company_display: str,
+    company_id: str,
+) -> dict[str, Any]:
+    return {
+        "job_id": str(j.get("id") or "").strip(),
+        "title": str(j.get("title") or "").strip(),
+        "company": company_display,
+        "published_at": str(j.get("updated_at") or "").strip(),
+        "updated_at": str(j.get("updated_at") or "").strip(),
+        "url": str(j.get("absolute_url") or "").strip(),
+        "salary": _greenhouse_location_short(j),
+        "source": f"career_page:{company_id}",
+        "career_company_id": company_id,
+        "raw": j,
+    }
+
+
+def fetch_via_greenhouse_board(
+    entry: dict[str, Any],
+    company_display: str,
+    company_id: str,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
+    """
+    Greenhouse public boards API (no key): ``boards-api.greenhouse.io``.
+    Optional mapping fields:
+    - ``greenhouse_board`` (required)
+    - ``greenhouse_usa_only`` (default true)
+    - ``greenhouse_title_substring`` (comma-separated; OR)
+    """
+    board = str(entry.get("greenhouse_board") or "").strip()
+    if not board:
+        raise RuntimeError("Missing greenhouse_board in career_page_mappings.json")
+    usa_only = bool(entry.get("greenhouse_usa_only", True))
+    url = f"{GREENHOUSE_BOARDS_API_BASE}/{board}/jobs"
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+    params = {"content": "true"}
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        r = client.get(url, params=params, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for j in jobs:
+        if not isinstance(j, dict):
+            continue
+        if usa_only and not _greenhouse_location_is_usa(j):
+            continue
+        if not _greenhouse_title_passes(j, entry):
+            continue
+        out.append(_normalize_greenhouse_job(j, company_display=company_display, company_id=company_id))
+        if len(out) >= TARGET_USA_JOBS:
+            break
+    return out
+
+
 def _serpapi_key_resolved() -> str:
     """Resolve SerpAPI key from environment (``SERPAPI_API_KEY`` / ``SERPAPI_KEY``)."""
     for k in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
@@ -686,6 +844,7 @@ FETCHERS: dict[str, FetcherFn] = {
     "eightfold_netflix": fetch_via_eightfold_netflix,
     "pcsx_microsoft": fetch_via_pcsx_microsoft,
     "amazon_jobs": fetch_via_amazon_jobs,
+    "greenhouse_board": fetch_via_greenhouse_board,
     "serpapi_careers": fetch_via_serpapi_careers,
 }
 
