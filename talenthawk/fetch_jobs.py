@@ -179,6 +179,19 @@ def _normalize_serpapi_job(j: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _serpapi_google_jobs_no_listings_message(message: str) -> bool:
+    """
+    SerpAPI sets ``error`` when Google Jobs returns zero hits for the query.
+    That is not the same as an invalid key / HTTP failure — return empty list instead of raising.
+    """
+    m = (message or "").lower()
+    return (
+        "hasn't returned any results" in m
+        or "has not returned any results" in m
+        or "no results found" in m
+    )
+
+
 def fetch_serpapi_google_jobs(
     api_key: str,
     query: str,
@@ -219,16 +232,22 @@ def fetch_serpapi_google_jobs(
             data = r.json()
             if not isinstance(data, dict):
                 break
+            raw_batch = data.get("jobs_results")
+            batch = raw_batch if isinstance(raw_batch, list) else []
             err = data.get("error")
             if err:
-                raise RuntimeError(str(err))
-            batch = data.get("jobs_results")
-            if isinstance(batch, list):
-                for item in batch:
-                    if isinstance(item, dict):
-                        norm = _normalize_serpapi_job(item)
-                        norm["raw"] = item
-                        out.append(norm)
+                msg = str(err).strip()
+                if batch:
+                    pass
+                elif _serpapi_google_jobs_no_listings_message(msg):
+                    break
+                else:
+                    raise RuntimeError(msg)
+            for item in batch:
+                if isinstance(item, dict):
+                    norm = _normalize_serpapi_job(item)
+                    norm["raw"] = item
+                    out.append(norm)
             pag = data.get("serpapi_pagination")
             token = None
             if isinstance(pag, dict):

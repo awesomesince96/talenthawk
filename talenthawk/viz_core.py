@@ -313,10 +313,12 @@ def filter_jobs_api_list_with_charts(
             continue
         title = str(j.get("title") or "")
         if it:
-            if set(tokenize_title_words(title)).isdisjoint(it):
+            title_tokens = set(tokenize_title_words(title))
+            if not it.issubset(title_tokens):
                 continue
         if is_kw:
-            if set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j))).isdisjoint(is_kw):
+            summary_tokens = set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j)))
+            if not is_kw.issubset(summary_tokens):
                 continue
         if ib:
             text = job_posting_plain_text_for_word_stats(j)
@@ -349,10 +351,12 @@ def filter_career_list_with_charts(rows: list[dict[str, Any]], includes: ChartIn
     for j in rows:
         title = str(j.get("title") or "")
         if it:
-            if set(tokenize_title_words(title)).isdisjoint(it):
+            title_tokens = set(tokenize_title_words(title))
+            if not it.issubset(title_tokens):
                 continue
         if is_kw:
-            if set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j))).isdisjoint(is_kw):
+            summary_tokens = set(tokenize_summary_words(job_posting_plain_text_for_word_stats(j)))
+            if not is_kw.issubset(summary_tokens):
                 continue
         if ib:
             text = job_posting_plain_text_for_word_stats(j)

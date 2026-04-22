@@ -540,7 +540,7 @@ function JobsPanel({
   return (
     <>
       <p className="hint">
-        Window from feed dates. Results are listed first; expand Title keywords and Job summary for charts and full word lists. Click or box-select to add includes (OR within each chart, AND across charts).{' '}
+        Window from feed dates. Results are listed first; expand Title keywords and Job summary for charts and full word lists. Title and summary keyword includes use AND matching.{' '}
         {!jobsData.has_fetched_jobs && 'Load listings with Refresh jobs in the sidebar.'}
       </p>
       <label className="search">
@@ -716,7 +716,7 @@ function JobsPanel({
       <details className="exp" open>
         <summary>Title keywords — distribution &amp; full list</summary>
         <h4 className="chart-h">Top title keywords (chart)</h4>
-        <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR). Deselect clears this chart’s filter.</p>
+        <p className="hint small">Click a bar or drag to box-select. A row must contain all selected title keywords. Deselect clears this chart’s filter.</p>
         <Fig
           fig={charts.title_keywords}
           onClick={(e) => {
@@ -994,7 +994,7 @@ function CareerPanel({
       <details className="exp" open>
         <summary>Title keywords — distribution &amp; full list</summary>
         <h4 className="chart-h">Top title keywords (chart)</h4>
-        <p className="hint small">Click a bar or drag to box-select. Each action adds to this chart’s includes (OR).</p>
+        <p className="hint small">Click a bar or drag to box-select. A row must contain all selected title keywords.</p>
         <Fig
           fig={charts.title_keywords}
           onClick={(e) => {
