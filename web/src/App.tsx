@@ -177,6 +177,7 @@ export default function App() {
     rows: { id: string; name: string; status: string }[]
     summary?: string
   } | null>(null)
+  const [careerProgressOpen, setCareerProgressOpen] = useState(false)
 
   const reloadBootstrap = useCallback(async () => {
     const b = await getBootstrap()
@@ -500,10 +501,13 @@ export default function App() {
             careerData={careerData}
             careerSel={careerSel}
             careerProgress={careerProgress}
+            careerProgressOpen={careerProgressOpen}
+            setCareerProgressOpen={setCareerProgressOpen}
             busy={busy}
             onRefresh={async () => {
               setBusy(true)
               setErr(null)
+              setCareerProgressOpen(true)
               setCareerProgress({
                 rows: careerSel.map((id) => ({
                   id,
@@ -524,6 +528,7 @@ export default function App() {
                             }
                           : null,
                       )
+                      setCareerProgressOpen(false)
                       return
                     }
                     if (!e.id) return
@@ -544,6 +549,7 @@ export default function App() {
               } catch (e) {
                 setErr(String(e))
                 setCareerProgress(null)
+                setCareerProgressOpen(false)
               } finally {
                 setBusy(false)
               }
@@ -880,6 +886,8 @@ function CareerPanel({
   careerData,
   careerSel,
   careerProgress,
+  careerProgressOpen,
+  setCareerProgressOpen,
   busy,
   onRefresh,
   inc,
@@ -890,6 +898,8 @@ function CareerPanel({
   careerData: Awaited<ReturnType<typeof postCareerView>>
   careerSel: string[]
   careerProgress: { rows: { id: string; name: string; status: string }[]; summary?: string } | null
+  careerProgressOpen: boolean
+  setCareerProgressOpen: (v: boolean) => void
   busy: boolean
   onRefresh: () => Promise<void>
   inc: ChartIncludes
@@ -924,25 +934,32 @@ function CareerPanel({
         Refresh career listings
       </button>
       {careerProgress?.rows.length ? (
-        <div className="career-progress" aria-live="polite">
-          <table>
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {careerProgress.rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="career-prog-name">{truncate(r.name, 28)}</td>
-                  <td className="career-prog-st">{r.status}</td>
+        <details
+          className="career-progress"
+          open={careerProgressOpen}
+          onToggle={(e) => setCareerProgressOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
+          <summary>Status by company</summary>
+          <div aria-live="polite">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {careerProgress.summary ? <p className="muted small career-prog-foot">{careerProgress.summary}</p> : null}
-        </div>
+              </thead>
+              <tbody>
+                {careerProgress.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="career-prog-name">{truncate(r.name, 28)}</td>
+                    <td className="career-prog-st">{r.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {careerProgress.summary ? <p className="muted small career-prog-foot">{careerProgress.summary}</p> : null}
+          </div>
+        </details>
       ) : null}
       {errs?.map((e) => (
         <p key={e} className="warn">
