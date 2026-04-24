@@ -32,6 +32,12 @@ UBER_PAGE_SIZE = 50
 UBER_COUNTRY_USA = "USA"
 NETFLIX_PAGE_SIZE = 10
 MICROSOFT_PAGE_SIZE = 10
+_VERY_STALE_CACHE_TTL_SECONDS = 10 * 365 * 24 * 60 * 60
+
+
+def _looks_like_rate_limit_error(message: str) -> bool:
+    m = (message or "").lower()
+    return "429" in m or "rate limit" in m or "too many requests" in m
 
 
 def _departments_from_careers_url(careers_list_url: str) -> list[str]:
@@ -982,6 +988,19 @@ def iter_career_refresh_events(
                 notes.append(f"{label} (fetch)")
                 yield {"id": c, "name": label, "phase": "done", "jobs": len(batch)}
         except Exception as e:
+            # When SerpAPI is rate-limited, prefer showing stale per-company cache over failing.
+            fetcher = str(entry.get("fetcher") or "").strip()
+            if fetcher == "serpapi_careers" and _looks_like_rate_limit_error(str(e)):
+                stale = read_career_company_cache(
+                    c,
+                    expected_fingerprint=fp,
+                    ttl_seconds=_VERY_STALE_CACHE_TTL_SECONDS,
+                )
+                if stale:
+                    merged.extend(stale)
+                    notes.append(f"{label} (cache fallback: 429)")
+                    yield {"id": c, "name": label, "phase": "cache", "jobs": len(stale)}
+                    continue
             errors.append(f"{c}: {e}")
             yield {"id": c, "name": label, "phase": "error", "err": str(e)}
 
