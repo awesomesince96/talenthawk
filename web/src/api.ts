@@ -73,17 +73,27 @@ export async function postCareerRefresh(body: {
   )
 }
 
+export async function postCareerStop() {
+  return json(
+    await fetch('/api/career/stop', {
+      method: 'POST',
+    }),
+  )
+}
+
 /**
  * Server-Sent Events over POST. Calls onEvent for each `data: {...}` line, then resolves when the stream ends.
  */
 export async function postCareerRefreshStream(
   body: { company_ids: string[]; bypass_cache: boolean },
   onEvent: (e: CareerProgressEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/career/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, stream: true }),
+    signal,
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   if (!res.body) throw new Error('No response body')

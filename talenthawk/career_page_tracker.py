@@ -895,6 +895,7 @@ def iter_career_refresh_events(
     company_ids: list[str],
     *,
     out: dict[str, Any] | None = None,
+    should_stop: Callable[[], bool] | None = None,
     timeout: float = 90.0,
     force_refresh: bool = False,
     use_cache: bool = True,
@@ -924,6 +925,9 @@ def iter_career_refresh_events(
     valid_ids = {str(c.get("id", "")).strip() for c in mappings.get("companies", []) if isinstance(c, dict)}
 
     for cid in company_ids:
+        if should_stop and should_stop():
+            yield {"phase": "stopped"}
+            break
         c = str(cid).strip()
         if not c:
             continue
@@ -965,6 +969,9 @@ def iter_career_refresh_events(
             yield {"id": c, "name": label, "phase": "skip"}
             continue
 
+        if should_stop and should_stop():
+            yield {"phase": "stopped"}
+            break
         yield {"id": c, "name": label, "phase": "work"}
         try:
             batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
@@ -1040,6 +1047,7 @@ def fetch_tracked_career_jobs(
     for _ in iter_career_refresh_events(
         company_ids,
         out=out,
+        should_stop=None,
         timeout=timeout,
         force_refresh=force_refresh,
         use_cache=use_cache,

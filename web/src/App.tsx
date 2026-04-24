@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import {
   addFilter,
   deleteFilter,
   emptyIncludes,
   getBootstrap,
+  postCareerStop,
   postCareerRefreshStream,
   postCareerView,
   postJobsRefresh,
@@ -33,6 +34,8 @@ function statusFromCareerEvent(e: CareerProgressEvent): string {
       return `error · ${(e.err || '').slice(0, 200)}`
     case 'skip':
       return 'skipped (no network)'
+    case 'stopped':
+      return 'stopped'
     default:
       return '—'
   }
@@ -178,6 +181,7 @@ export default function App() {
     summary?: string
   } | null>(null)
   const [careerProgressOpen, setCareerProgressOpen] = useState(false)
+  const careerRefreshAbortRef = useRef<AbortController | null>(null)
 
   const reloadBootstrap = useCallback(async () => {
     const b = await getBootstrap()
@@ -508,6 +512,8 @@ export default function App() {
               setBusy(true)
               setErr(null)
               setCareerProgressOpen(true)
+              const ctl = new AbortController()
+              careerRefreshAbortRef.current = ctl
               setCareerProgress({
                 rows: careerSel.map((id) => ({
                   id,
@@ -519,6 +525,11 @@ export default function App() {
                 await postCareerRefreshStream(
                   { company_ids: careerSel, bypass_cache: careerBypass },
                   (e) => {
+                    if (e.phase === 'stopped') {
+                      setCareerProgress((p) => (p ? { ...p, summary: 'Stopped by user' } : null))
+                      setCareerProgressOpen(false)
+                      return
+                    }
                     if (e.phase === 'complete') {
                       setCareerProgress((p) =>
                         p
@@ -543,15 +554,28 @@ export default function App() {
                       }
                     })
                   },
+                  ctl.signal,
                 )
                 await reloadBootstrap()
                 await loadCareerView()
               } catch (e) {
-                setErr(String(e))
-                setCareerProgress(null)
+                if (e instanceof Error && e.name === 'AbortError') {
+                  setCareerProgress((p) => (p ? { ...p, summary: 'Stopped by user' } : p))
+                } else {
+                  setErr(String(e))
+                  setCareerProgress(null)
+                }
                 setCareerProgressOpen(false)
               } finally {
                 setBusy(false)
+                careerRefreshAbortRef.current = null
+              }
+            }}
+            onStop={async () => {
+              try {
+                await postCareerStop()
+              } finally {
+                careerRefreshAbortRef.current?.abort()
               }
             }}
             inc={incCareer}
@@ -890,6 +914,7 @@ function CareerPanel({
   setCareerProgressOpen,
   busy,
   onRefresh,
+  onStop,
   inc,
   setInc,
   onAddTitle,
@@ -902,6 +927,7 @@ function CareerPanel({
   setCareerProgressOpen: (v: boolean) => void
   busy: boolean
   onRefresh: () => Promise<void>
+  onStop: () => Promise<void>
   inc: ChartIncludes
   setInc: (c: ChartIncludes | ((p: ChartIncludes) => ChartIncludes)) => void
   onAddTitle: (t: string) => Promise<void>
@@ -933,6 +959,11 @@ function CareerPanel({
       <button type="button" className="primary" disabled={busy || !careerSel.length} onClick={() => onRefresh()}>
         Refresh career listings
       </button>
+      {busy ? (
+        <button type="button" className="small" onClick={() => onStop()} style={{ marginLeft: '0.5rem' }}>
+          Stop
+        </button>
+      ) : null}
       {careerProgress?.rows.length ? (
         <details
           className="career-progress"

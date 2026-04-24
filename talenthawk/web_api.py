@@ -97,6 +97,7 @@ class AppState:
         self.career_tracker_rows: list[dict[str, Any]] = []
         self.career_tracker_errs: list[str] = []
         self.career_cache_notes: list[str] = []
+        self.career_refresh_stop: bool = False
 
 
 STATE = AppState()
@@ -347,6 +348,7 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
     if not body.company_ids:
         raise HTTPException(status_code=400, detail="Select at least one company")
     sel = [str(x).strip() for x in body.company_ids if str(x).strip()]
+    STATE.career_refresh_stop = False
 
     if body.stream:
         out: dict[str, Any] = {}
@@ -355,6 +357,7 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
             for ev in iter_career_refresh_events(
                 sel,
                 out=out,
+                should_stop=lambda: bool(STATE.career_refresh_stop),
                 force_refresh=body.bypass_cache,
                 use_cache=not body.bypass_cache,
             ):
@@ -368,6 +371,7 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
             STATE.career_cache_notes = list(notes)
             STATE.career_tracker_selection = sel
             save_career_tracker_filter(sel)
+            STATE.career_refresh_stop = False
 
         return StreamingResponse(
             sse(),
@@ -386,6 +390,12 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
     STATE.career_tracker_selection = sel
     save_career_tracker_filter(sel)
     return {"ok": bool(jobs), "count": len(jobs), "errs": errs, "notes": notes}
+
+
+@app.post("/api/career/stop")
+def stop_career_refresh() -> dict[str, bool]:
+    STATE.career_refresh_stop = True
+    return {"ok": True}
 
 
 @app.post("/api/filters/title-ignore")
