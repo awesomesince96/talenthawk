@@ -13,6 +13,7 @@ from talenthawk.fetch_jobs import fetch_serpapi_google_jobs
 from talenthawk.job_cache import (
     DEFAULT_TTL_SECONDS,
     career_entry_fingerprint,
+    merge_job_lists,
     read_career_company_cache,
     write_career_company_cache,
 )
@@ -38,6 +39,21 @@ _VERY_STALE_CACHE_TTL_SECONDS = 10 * 365 * 24 * 60 * 60
 def _looks_like_rate_limit_error(message: str) -> bool:
     m = (message or "").lower()
     return "429" in m or "rate limit" in m or "too many requests" in m
+
+
+def _row_effective_dt(row: dict[str, Any]) -> datetime | None:
+    """Best-effort timestamp for incremental cache watermark checks."""
+    return _parse_uber_iso_dt(row.get("published_at")) or _parse_uber_iso_dt(row.get("updated_at"))
+
+
+def _rows_window_iso(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
+    dts = [dt for r in rows if isinstance(r, dict) for dt in [_row_effective_dt(r)] if dt is not None]
+    if not dts:
+        return None
+    dts.sort()
+    lo = dts[0].isoformat().replace("+00:00", "Z")
+    hi = dts[-1].isoformat().replace("+00:00", "Z")
+    return (lo, hi)
 
 
 def _departments_from_careers_url(careers_list_url: str) -> list[str]:
@@ -956,12 +972,27 @@ def iter_career_refresh_events(
         label = str(entry.get("display_name") or c).strip() or c
         yield {"id": c, "name": label, "phase": "start"}
 
+        # Always read fingerprint-matching cache to compute incremental watermark and preserve history.
+        prior_cache = read_career_company_cache(
+            c,
+            expected_fingerprint=fp,
+            ttl_seconds=_VERY_STALE_CACHE_TTL_SECONDS,
+        )
+        prior_rows = prior_cache if isinstance(prior_cache, list) else []
+        since_dt = None
+        if prior_rows:
+            prior_dts = [dt for r in prior_rows for dt in [_row_effective_dt(r)] if dt is not None]
+            since_dt = max(prior_dts) if prior_dts else None
+
         if use_cache and not force_refresh:
             cached = read_career_company_cache(c, expected_fingerprint=fp, ttl_seconds=cache_ttl_seconds)
             if cached is not None:
                 n = len(cached)
                 merged.extend(cached)
                 notes.append(f"{label} (cache)")
+                w = _rows_window_iso(cached)
+                if w:
+                    notes.append(f"{label} window {w[0]} -> {w[1]}")
                 yield {"id": c, "name": label, "phase": "cache", "jobs": n}
                 continue
 
@@ -976,24 +1007,42 @@ def iter_career_refresh_events(
         try:
             batch = fetch_jobs_for_company(c, mappings=mappings, timeout=timeout)
             if not batch:
-                em = f"{c}: no roles returned (API change or empty results)"
-                errors.append(em)
-                yield {
-                    "id": c,
-                    "name": label,
-                    "phase": "error",
-                    "err": "no roles returned (API change or empty results)",
-                }
+                if prior_rows:
+                    merged.extend(prior_rows)
+                    notes.append(f"{label} (cache: no new)")
+                    w = _rows_window_iso(prior_rows)
+                    if w:
+                        notes.append(f"{label} window {w[0]} -> {w[1]}")
+                    yield {"id": c, "name": label, "phase": "cache", "jobs": len(prior_rows)}
+                else:
+                    em = f"{c}: no roles returned (API change or empty results)"
+                    errors.append(em)
+                    yield {
+                        "id": c,
+                        "name": label,
+                        "phase": "error",
+                        "err": "no roles returned (API change or empty results)",
+                    }
             else:
-                merged.extend(batch)
-                write_career_company_cache(
-                    c,
-                    batch,
-                    config_fingerprint=fp,
-                    source=str(batch[0].get("source") or "career_page") if batch else "career_page",
-                )
-                notes.append(f"{label} (fetch)")
-                yield {"id": c, "name": label, "phase": "done", "jobs": len(batch)}
+                # Incremental: keep only rows newer than latest cached timestamp.
+                new_rows = batch
+                if since_dt is not None:
+                    new_rows = [r for r in batch if (_row_effective_dt(r) is None or _row_effective_dt(r) > since_dt)]
+                effective_rows = merge_job_lists(prior_rows, new_rows) if prior_rows else list(new_rows)
+                if effective_rows:
+                    merged.extend(effective_rows)
+                if new_rows:
+                    write_career_company_cache(
+                        c,
+                        new_rows,
+                        config_fingerprint=fp,
+                        source=str(new_rows[0].get("source") or "career_page") if new_rows else "career_page",
+                    )
+                notes.append(f"{label} (fetch: +{len(new_rows)} new)")
+                w = _rows_window_iso(effective_rows)
+                if w:
+                    notes.append(f"{label} window {w[0]} -> {w[1]}")
+                yield {"id": c, "name": label, "phase": "done", "jobs": len(effective_rows)}
         except Exception as e:
             # When SerpAPI is rate-limited, prefer showing stale per-company cache over failing.
             fetcher = str(entry.get("fetcher") or "").strip()
@@ -1006,6 +1055,9 @@ def iter_career_refresh_events(
                 if stale:
                     merged.extend(stale)
                     notes.append(f"{label} (cache fallback: 429)")
+                    w = _rows_window_iso(stale)
+                    if w:
+                        notes.append(f"{label} window {w[0]} -> {w[1]}")
                     yield {"id": c, "name": label, "phase": "cache", "jobs": len(stale)}
                     continue
             errors.append(f"{c}: {e}")
