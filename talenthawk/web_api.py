@@ -352,8 +352,24 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
 
     if body.stream:
         out: dict[str, Any] = {}
+        stale_cache_ttl = 10 * 365 * 24 * 60 * 60
 
         def sse() -> Any:
+            # Cache-first: show cached rows immediately, then progressively apply fresh fetch results.
+            c_jobs, c_errs, c_notes = fetch_tracked_career_jobs(
+                sel,
+                force_refresh=False,
+                use_cache=True,
+                allow_network=False,
+                cache_ttl_seconds=stale_cache_ttl,
+            )
+            STATE.career_tracker_rows = list(c_jobs)
+            STATE.career_tracker_errs = list(c_errs)
+            STATE.career_cache_notes = list(c_notes)
+            STATE.career_tracker_selection = sel
+            save_career_tracker_filter(sel)
+            yield f"data: {json.dumps({'phase': 'prefill', 'total_jobs': len(c_jobs)}, ensure_ascii=False)}\n\n".encode("utf-8")
+
             for ev in iter_career_refresh_events(
                 sel,
                 out=out,
@@ -361,6 +377,13 @@ def refresh_career(body: RefreshCareerRequest) -> Any:
                 force_refresh=body.bypass_cache,
                 use_cache=not body.bypass_cache,
             ):
+                jobs = out.get("rows", [])
+                errs = out.get("errors", [])
+                notes = out.get("notes", [])
+                STATE.career_tracker_rows = list(jobs)
+                STATE.career_tracker_errs = list(errs)
+                STATE.career_cache_notes = list(notes)
+                STATE.career_tracker_selection = sel
                 line = f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
                 yield line.encode("utf-8")
             jobs = out.get("rows", [])

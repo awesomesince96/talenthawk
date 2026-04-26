@@ -940,6 +940,11 @@ def iter_career_refresh_events(
     notes: list[str] = []
     valid_ids = {str(c.get("id", "")).strip() for c in mappings.get("companies", []) if isinstance(c, dict)}
 
+    def _sync_store() -> None:
+        store["rows"] = sort_career_jobs_by_created_desc(merged)
+        store["errors"] = list(errors)
+        store["notes"] = list(notes)
+
     for cid in company_ids:
         if should_stop and should_stop():
             yield {"phase": "stopped"}
@@ -950,6 +955,7 @@ def iter_career_refresh_events(
         if c not in valid_ids:
             em = f"{c}: not in career_page_mappings.json"
             errors.append(em)
+            _sync_store()
             yield {
                 "id": c,
                 "name": c,
@@ -961,6 +967,7 @@ def iter_career_refresh_events(
         if not entry:
             em = f"{c}: not in career_page_mappings.json"
             errors.append(em)
+            _sync_store()
             yield {
                 "id": c,
                 "name": c,
@@ -993,6 +1000,7 @@ def iter_career_refresh_events(
                 w = _rows_window_iso(cached)
                 if w:
                     notes.append(f"{label} window {w[0]} -> {w[1]}")
+                _sync_store()
                 yield {"id": c, "name": label, "phase": "cache", "jobs": n}
                 continue
 
@@ -1013,10 +1021,12 @@ def iter_career_refresh_events(
                     w = _rows_window_iso(prior_rows)
                     if w:
                         notes.append(f"{label} window {w[0]} -> {w[1]}")
+                    _sync_store()
                     yield {"id": c, "name": label, "phase": "cache", "jobs": len(prior_rows)}
                 else:
                     em = f"{c}: no roles returned (API change or empty results)"
                     errors.append(em)
+                    _sync_store()
                     yield {
                         "id": c,
                         "name": label,
@@ -1042,6 +1052,7 @@ def iter_career_refresh_events(
                 w = _rows_window_iso(effective_rows)
                 if w:
                     notes.append(f"{label} window {w[0]} -> {w[1]}")
+                _sync_store()
                 yield {"id": c, "name": label, "phase": "done", "jobs": len(effective_rows)}
         except Exception as e:
             # When SerpAPI is rate-limited, prefer showing stale per-company cache over failing.
@@ -1058,9 +1069,11 @@ def iter_career_refresh_events(
                     w = _rows_window_iso(stale)
                     if w:
                         notes.append(f"{label} window {w[0]} -> {w[1]}")
+                    _sync_store()
                     yield {"id": c, "name": label, "phase": "cache", "jobs": len(stale)}
                     continue
             errors.append(f"{c}: {e}")
+            _sync_store()
             yield {"id": c, "name": label, "phase": "error", "err": str(e)}
 
     rows = sort_career_jobs_by_created_desc(merged)

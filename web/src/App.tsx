@@ -525,6 +525,10 @@ export default function App() {
                 await postCareerRefreshStream(
                   { company_ids: careerSel, bypass_cache: careerBypass },
                   (e) => {
+                    if (e.phase === 'prefill') {
+                      loadCareerView().catch(() => {})
+                      return
+                    }
                     if (e.phase === 'stopped') {
                       setCareerProgress((p) => (p ? { ...p, summary: 'Stopped by user' } : null))
                       setCareerProgressOpen(false)
@@ -553,6 +557,9 @@ export default function App() {
                         ),
                       }
                     })
+                    if (e.phase === 'cache' || e.phase === 'done' || e.phase === 'error') {
+                      loadCareerView().catch(() => {})
+                    }
                   },
                   ctl.signal,
                 )
