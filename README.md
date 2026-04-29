@@ -20,6 +20,10 @@
 - Assigns a **category** per job from **built-in title keywords** in code (`talenthawk/categorize.py`); first match wins, else **Other**.
 - **Three filters** (JSON under `data/persistence/`): **title**, **company**, **category** — substring rules, case-insensitive. Use **−** on a row to add a rule; **✕** in the **Filters** panel to remove.
 - **Career page tracker**: choose tracked companies in the sidebar; **`data/mappings/career_page_mappings.json`** maps each company to a careers list URL and fetcher.
+  - Refresh is **cache-first**: cached rows render first, then companies update progressively as live results arrive.
+  - Per-company status is shown during refresh (`sent`, `fetching`, `received`, `error`) and can be stopped with **Stop**.
+  - On SerpAPI **429** rate limits, tracker falls back to cached company data when available.
+  - Incremental refresh uses a per-company timestamp watermark (`published_at` / `updated_at`) and only treats newer rows as new; notes include cache window (`from -> to`) per company.
 
 The UI is a **React** app (Vite + TypeScript + Plotly) talking to a local **FastAPI** backend (`talenthawk/web_api.py`).
 
@@ -94,6 +98,11 @@ Open **http://127.0.0.1:8000** (serves the built app when `web/dist` exists).
 | File | Purpose |
 |------|---------|
 | `career_page_mappings.json` | **Career page tracker**: company id, display name, careers list URL, and `fetcher` id (see defaults in `talenthawk/settings.py`). |
+
+**`data/jobs/career/`** (gitignored cache snapshots)
+
+- Per-company cache files used by the Career tracker.
+- Used for cache-first rendering, 429 fallback, and incremental refresh watermarking.
 
 Empty filter files default to `[]` if missing. `serpapi_prefs.json` appears after the first refresh (or you can create it by hand). On first run, `career_page_mappings.json` is created from `DEFAULT_CAREER_PAGE_MAPPINGS` in `talenthawk/settings.py` if absent.
 
