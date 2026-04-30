@@ -154,7 +154,8 @@ function truncate(s: string, n: number) {
 export default function App() {
   const [boot, setBoot] = useState<Bootstrap | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [view, setView] = useState<'career' | 'jobs'>('career')
+  const [view, setView] = useState<'career' | 'jobs' | 'visualize'>('career')
+  const [vizSource, setVizSource] = useState<'jobs' | 'career'>('career')
 
   const [titleIgnoreText, setTitleIgnoreText] = useState('')
 
@@ -225,6 +226,13 @@ export default function App() {
     if (view !== 'career') return
     loadCareerView().catch((e: Error) => setErr(String(e.message)))
   }, [boot, view, loadCareerView])
+
+  useEffect(() => {
+    if (!boot) return
+    if (view !== 'visualize') return
+    if (!jobsData) loadJobsView().catch(() => {})
+    if (!careerData) loadCareerView().catch(() => {})
+  }, [boot, view, jobsData, careerData, loadJobsView, loadCareerView])
 
   if (!boot) {
     return (
@@ -369,6 +377,10 @@ export default function App() {
           <label className="row">
             <input type="radio" name="view" checked={view === 'jobs'} onChange={() => setView('jobs')} />
             Jobs API
+          </label>
+          <label className="row">
+            <input type="radio" name="view" checked={view === 'visualize'} onChange={() => setView('visualize')} />
+            Visualize
           </label>
         </section>
 
@@ -591,8 +603,108 @@ export default function App() {
             f={f}
           />
         )}
+
+        {view === 'visualize' && (
+          <VisualizePanel
+            source={vizSource}
+            setSource={setVizSource}
+            jobsData={jobsData}
+            careerData={careerData}
+            incJobs={incJobs}
+            setIncJobs={setIncJobs}
+            incCareer={incCareer}
+            setIncCareer={setIncCareer}
+          />
+        )}
       </main>
     </div>
+  )
+}
+
+function VisualizePanel({
+  source,
+  setSource,
+  jobsData,
+  careerData,
+  incJobs,
+  setIncJobs,
+  incCareer,
+  setIncCareer,
+}: {
+  source: 'jobs' | 'career'
+  setSource: (v: 'jobs' | 'career') => void
+  jobsData: Awaited<ReturnType<typeof postJobsView>> | null
+  careerData: Awaited<ReturnType<typeof postCareerView>> | null
+  incJobs: ChartIncludes
+  setIncJobs: (c: ChartIncludes | ((p: ChartIncludes) => ChartIncludes)) => void
+  incCareer: ChartIncludes
+  setIncCareer: (c: ChartIncludes | ((p: ChartIncludes) => ChartIncludes)) => void
+}) {
+  const data = source === 'jobs' ? jobsData : careerData
+  if (!data) {
+    return <p className="info">Loading data for visualization…</p>
+  }
+  const kw = (data as { keyword_lists?: { title: KeywordRow[]; summary: KeywordRow[] } }).keyword_lists ?? {
+    title: [] as KeywordRow[],
+    summary: [] as KeywordRow[],
+  }
+  const byWord = new Map<string, number>()
+  for (const r of kw.title) byWord.set(r.word, (byWord.get(r.word) ?? 0) + r.count)
+  for (const r of kw.summary) byWord.set(r.word, (byWord.get(r.word) ?? 0) + r.count)
+  const words = [...byWord.entries()]
+    .map(([word, count]) => ({ word, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 140)
+  const maxC = words[0]?.count ?? 1
+  const minC = words[words.length - 1]?.count ?? 1
+
+  const includes = source === 'jobs' ? incJobs : incCareer
+  const setIncludes = source === 'jobs' ? setIncJobs : setIncCareer
+  const onToggle = (w: string) => {
+    const inTitle = includes.title_tokens.includes(w)
+    const inSummary = includes.summary_tokens.includes(w)
+    setIncludes((p) => ({
+      ...p,
+      title_tokens: inTitle ? p.title_tokens.filter((x) => x !== w) : [...new Set([...p.title_tokens, w])],
+      summary_tokens: inSummary ? p.summary_tokens.filter((x) => x !== w) : [...new Set([...p.summary_tokens, w])],
+    }))
+  }
+
+  return (
+    <>
+      <div className="viz-toolbar">
+        <h2>Visualize</h2>
+        <label className="row">
+          Source
+          <select value={source} onChange={(e) => setSource(e.target.value as 'jobs' | 'career')}>
+            <option value="career">Career tracker</option>
+            <option value="jobs">Jobs API</option>
+          </select>
+        </label>
+      </div>
+      <p className="hint">
+        Word cloud from <strong>title + description</strong> keywords. Click a word to toggle it in existing includes (title and summary tokens).
+      </p>
+      <div className="wordcloud">
+        {words.map((w) => {
+          const ratio = maxC === minC ? 1 : (w.count - minC) / (maxC - minC)
+          const size = 12 + Math.round(ratio * 42)
+          const active = includes.title_tokens.includes(w.word) || includes.summary_tokens.includes(w.word)
+          return (
+            <button
+              key={w.word}
+              type="button"
+              className={`wc-word${active ? ' on' : ''}`}
+              style={{ fontSize: `${size}px` }}
+              title={`${w.word} · ${w.count} rows`}
+              onClick={() => onToggle(w.word)}
+            >
+              {w.word}
+            </button>
+          )
+        })}
+      </div>
+    </>
   )
 }
 
