@@ -56,6 +56,8 @@ from talenthawk.viz_core import (
     truncate,
 )
 
+_VERY_STALE_CACHE_TTL_SECONDS = 10 * 365 * 24 * 60 * 60
+
 
 def _serpapi_key() -> str | None:
     for env in ("SERPAPI_API_KEY", "SERPAPI_KEY"):
@@ -188,6 +190,7 @@ async def lifespan(app: FastAPI):
             force_refresh=False,
             use_cache=True,
             allow_network=False,
+            cache_ttl_seconds=_VERY_STALE_CACHE_TTL_SECONDS,
         )
         if jobs:
             STATE.career_tracker_rows = jobs
