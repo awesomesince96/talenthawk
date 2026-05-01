@@ -156,6 +156,8 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null)
   const [view, setView] = useState<'career' | 'jobs' | 'visualize'>('career')
   const [vizSource, setVizSource] = useState<'jobs' | 'career'>('career')
+  const [vizHideJobs, setVizHideJobs] = useState<string[]>([])
+  const [vizHideCareer, setVizHideCareer] = useState<string[]>([])
 
   const [titleIgnoreText, setTitleIgnoreText] = useState('')
 
@@ -610,10 +612,8 @@ export default function App() {
             setSource={setVizSource}
             jobsData={jobsData}
             careerData={careerData}
-            incJobs={incJobs}
-            setIncJobs={setIncJobs}
-            incCareer={incCareer}
-            setIncCareer={setIncCareer}
+            hiddenWords={vizSource === 'jobs' ? vizHideJobs : vizHideCareer}
+            setHiddenWords={vizSource === 'jobs' ? setVizHideJobs : setVizHideCareer}
           />
         )}
       </main>
@@ -626,20 +626,18 @@ function VisualizePanel({
   setSource,
   jobsData,
   careerData,
-  incJobs,
-  setIncJobs,
-  incCareer,
-  setIncCareer,
+  hiddenWords,
+  setHiddenWords,
 }: {
   source: 'jobs' | 'career'
   setSource: (v: 'jobs' | 'career') => void
   jobsData: Awaited<ReturnType<typeof postJobsView>> | null
   careerData: Awaited<ReturnType<typeof postCareerView>> | null
-  incJobs: ChartIncludes
-  setIncJobs: (c: ChartIncludes | ((p: ChartIncludes) => ChartIncludes)) => void
-  incCareer: ChartIncludes
-  setIncCareer: (c: ChartIncludes | ((p: ChartIncludes) => ChartIncludes)) => void
+  hiddenWords: string[]
+  setHiddenWords: (v: string[] | ((p: string[]) => string[])) => void
 }) {
+  const [minCount, setMinCount] = useState(1)
+  const [q, setQ] = useState('')
   const data = source === 'jobs' ? jobsData : careerData
   if (!data) {
     return <p className="info">Loading data for visualization…</p>
@@ -654,21 +652,16 @@ function VisualizePanel({
   const words = [...byWord.entries()]
     .map(([word, count]) => ({ word, count }))
     .sort((a, b) => b.count - a.count)
-    .slice(0, 140)
   const maxC = words[0]?.count ?? 1
   const minC = words[words.length - 1]?.count ?? 1
-
-  const includes = source === 'jobs' ? incJobs : incCareer
-  const setIncludes = source === 'jobs' ? setIncJobs : setIncCareer
-  const onToggle = (w: string) => {
-    const inTitle = includes.title_tokens.includes(w)
-    const inSummary = includes.summary_tokens.includes(w)
-    setIncludes((p) => ({
-      ...p,
-      title_tokens: inTitle ? p.title_tokens.filter((x) => x !== w) : [...new Set([...p.title_tokens, w])],
-      summary_tokens: inSummary ? p.summary_tokens.filter((x) => x !== w) : [...new Set([...p.summary_tokens, w])],
-    }))
+  const hidden = new Set(hiddenWords.map((x) => x.toLowerCase()))
+  const qq = q.trim().toLowerCase()
+  const visibleWords = words.filter((w) => w.count >= minCount && !hidden.has(w.word.toLowerCase()) && (!qq || w.word.toLowerCase().includes(qq)))
+  const onHide = (w: string) => {
+    const wl = w.toLowerCase()
+    setHiddenWords((p) => (p.some((x) => x.toLowerCase() === wl) ? p : [...p, w]))
   }
+  const onUnhide = (w: string) => setHiddenWords((p) => p.filter((x) => x.toLowerCase() !== w.toLowerCase()))
 
   return (
     <>
@@ -683,26 +676,70 @@ function VisualizePanel({
         </label>
       </div>
       <p className="hint">
-        Word cloud from <strong>title + description</strong> keywords. Click a word to toggle it in existing includes (title and summary tokens).
+        Word cloud from <strong>title + description</strong> keywords. Click a word to add it to the visualize-only hide list.
       </p>
-      <div className="wordcloud">
-        {words.map((w) => {
+      <div className="viz-toolbar" style={{ marginBottom: 0 }}>
+        <label className="row">
+          Min count
+          <input
+            type="range"
+            min={1}
+            max={Math.max(1, maxC)}
+            value={minCount}
+            onChange={(e) => setMinCount(Number(e.target.value))}
+            style={{ width: '10rem' }}
+          />
+          <span className="mono">{minCount}</span>
+        </label>
+        <label className="row">
+          Search
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="word..." style={{ width: '12rem' }} />
+        </label>
+      </div>
+      <p className="muted small">
+        {visibleWords.length} shown / {words.length} total distinct words
+      </p>
+      <div className="viz-layout">
+        <aside className="viz-hide">
+          <h4>Visualize hide list ({hiddenWords.length})</h4>
+          {!hiddenWords.length ? (
+            <p className="muted small">No hidden words.</p>
+          ) : (
+            <ul>
+              {hiddenWords.slice().sort().map((w) => (
+                <li key={w}>
+                  <span>{w}</span>
+                  <button type="button" className="linkish" onClick={() => onUnhide(w)}>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {hiddenWords.length ? (
+            <button type="button" className="small" onClick={() => setHiddenWords([])}>
+              Clear hide list
+            </button>
+          ) : null}
+        </aside>
+        <div className="wordcloud">
+          {visibleWords.map((w) => {
           const ratio = maxC === minC ? 1 : (w.count - minC) / (maxC - minC)
           const size = 12 + Math.round(ratio * 42)
-          const active = includes.title_tokens.includes(w.word) || includes.summary_tokens.includes(w.word)
           return (
             <button
               key={w.word}
               type="button"
-              className={`wc-word${active ? ' on' : ''}`}
+              className="wc-word"
               style={{ fontSize: `${size}px` }}
               title={`${w.word} · ${w.count} rows`}
-              onClick={() => onToggle(w.word)}
+              onClick={() => onHide(w.word)}
             >
               {w.word}
             </button>
           )
-        })}
+          })}
+        </div>
       </div>
     </>
   )
