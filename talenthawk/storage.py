@@ -21,6 +21,7 @@ from talenthawk.settings import (
     SERPAPI_PREFS_FILE,
     TITLE_FILTER_FILE,
     TITLE_IGNORE_WORDS_FILE,
+    VISUALIZE_HIDE_WORDS_FILE,
 )
 
 
@@ -152,6 +153,22 @@ def save_career_tracker_filter(company_ids: list[str]) -> None:
     _write_json(CAREER_PAGE_TRACKER_FILTER_FILE, cleaned)
 
 
+def load_visualize_hide_words() -> dict[str, list[str]]:
+    default: dict[str, list[str]] = {"jobs": [], "career": []}
+    raw = _read_json(VISUALIZE_HIDE_WORDS_FILE, default.copy())
+    if not isinstance(raw, dict):
+        return default.copy()
+    jobs = _normalize_filter_list(raw.get("jobs"))
+    career = _normalize_filter_list(raw.get("career"))
+    return {"jobs": jobs, "career": career}
+
+
+def save_visualize_hide_words(payload: dict[str, list[str]]) -> None:
+    jobs = sorted({x.strip() for x in payload.get("jobs", []) if str(x).strip()}, key=str.lower)
+    career = sorted({x.strip() for x in payload.get("career", []) if str(x).strip()}, key=str.lower)
+    _write_json(VISUALIZE_HIDE_WORDS_FILE, {"jobs": jobs, "career": career})
+
+
 def persistence_paths() -> dict[str, Path]:
     return {
         "persistence_dir": PERSISTENCE_DIR,
@@ -163,4 +180,5 @@ def persistence_paths() -> dict[str, Path]:
         "serpapi_prefs": SERPAPI_PREFS_FILE,
         "career_page_mappings": CAREER_PAGE_MAPPINGS_FILE,
         "career_page_tracker_filter": CAREER_PAGE_TRACKER_FILTER_FILE,
+        "visualize_hide_words": VISUALIZE_HIDE_WORDS_FILE,
     }

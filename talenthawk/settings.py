@@ -15,6 +15,7 @@ COMPANY_FILTER_FILE = PERSISTENCE_DIR / "company_filter.json"
 CATEGORY_FILTER_FILE = PERSISTENCE_DIR / "category_filter.json"
 SERPAPI_PREFS_FILE = PERSISTENCE_DIR / "serpapi_prefs.json"
 CAREER_PAGE_TRACKER_FILTER_FILE = PERSISTENCE_DIR / "career_page_tracker_filter.json"
+VISUALIZE_HIDE_WORDS_FILE = PERSISTENCE_DIR / "visualize_hide_words.json"
 CAREER_PAGE_MAPPINGS_FILE = MAPPINGS_DIR / "career_page_mappings.json"
 
 REMOTE_JOBS_URL = "https://remotive.com/api/remote-jobs"

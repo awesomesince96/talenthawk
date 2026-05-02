@@ -12,6 +12,7 @@ import {
   postJobsView,
   postCareerSelection,
   postTitleIgnore,
+  postVisualizeHide,
   type CareerProgressEvent,
   type ChartIncludes,
 } from './api'
@@ -196,6 +197,9 @@ export default function App() {
     setSerpPages(b.state.serpapi_pages ?? 3)
     setJobsRecency(b.state.jobs_recency_days ?? 30)
     setCareerSel(b.state.career_tracker_selection ?? [])
+    const vh = (b.filters?.visualize_hide_words ?? { jobs: [], career: [] }) as { jobs?: string[]; career?: string[] }
+    setVizHideJobs(Array.isArray(vh.jobs) ? vh.jobs : [])
+    setVizHideCareer(Array.isArray(vh.career) ? vh.career : [])
     return b
   }, [])
 
@@ -613,7 +617,17 @@ export default function App() {
             jobsData={jobsData}
             careerData={careerData}
             hiddenWords={vizSource === 'jobs' ? vizHideJobs : vizHideCareer}
-            setHiddenWords={vizSource === 'jobs' ? setVizHideJobs : setVizHideCareer}
+            setHiddenWords={(updater) => {
+              if (vizSource === 'jobs') {
+                const next = typeof updater === 'function' ? updater(vizHideJobs) : updater
+                setVizHideJobs(next)
+                postVisualizeHide({ jobs: next, career: vizHideCareer }).catch(() => {})
+              } else {
+                const next = typeof updater === 'function' ? updater(vizHideCareer) : updater
+                setVizHideCareer(next)
+                postVisualizeHide({ jobs: vizHideJobs, career: next }).catch(() => {})
+              }
+            }}
           />
         )}
       </main>

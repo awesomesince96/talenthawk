@@ -155,6 +155,16 @@ export async function postTitleIgnore(text: string) {
   )
 }
 
+export async function postVisualizeHide(body: { jobs: string[]; career: string[] }) {
+  return json(
+    await fetch('/api/filters/visualize-hide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
 export async function deleteFilter(kind: 'title' | 'company' | 'category', entry: string) {
   const enc = encodeURIComponent(entry)
   return json(await fetch(`/api/filters/${kind}/${enc}`, { method: 'DELETE' }))

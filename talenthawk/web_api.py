@@ -39,6 +39,7 @@ from talenthawk.storage import (
     load_serpapi_prefs,
     load_title_filters,
     load_title_ignore_words,
+    load_visualize_hide_words,
     persistence_paths,
     save_career_tracker_filter,
     save_category_filters,
@@ -46,6 +47,7 @@ from talenthawk.storage import (
     save_serpapi_prefs,
     save_title_filters,
     save_title_ignore_words,
+    save_visualize_hide_words,
 )
 from talenthawk.viz_core import (
     ChartIncludes,
@@ -80,6 +82,8 @@ def ensure_persistence_defaults() -> None:
         save_category_filters([])
     if not paths["title_ignore_words"].exists():
         save_title_ignore_words([])
+    if not paths["visualize_hide_words"].exists():
+        save_visualize_hide_words({"jobs": [], "career": []})
     load_career_page_mappings()
 
 
@@ -262,6 +266,11 @@ class SaveTitleIgnoreRequest(BaseModel):
     text: str
 
 
+class SaveVisualizeHideRequest(BaseModel):
+    jobs: list[str] = Field(default_factory=list)
+    career: list[str] = Field(default_factory=list)
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -300,6 +309,7 @@ def bootstrap() -> dict[str, Any]:
             "company": load_company_filters(),
             "category": load_category_filters(),
             "title_ignore_words": load_title_ignore_words(),
+            "visualize_hide_words": load_visualize_hide_words(),
         },
     }
 
@@ -429,6 +439,13 @@ def save_title_ignore(body: SaveTitleIgnoreRequest) -> dict[str, Any]:
     words = parse_title_ignore_words_input(body.text)
     save_title_ignore_words(words)
     return {"saved": len(words)}
+
+
+@app.post("/api/filters/visualize-hide")
+def save_visualize_hide(body: SaveVisualizeHideRequest) -> dict[str, Any]:
+    payload = {"jobs": list(body.jobs), "career": list(body.career)}
+    save_visualize_hide_words(payload)
+    return {"saved": len(payload["jobs"]) + len(payload["career"])}
 
 
 @app.delete("/api/filters/title/{entry:path}")
