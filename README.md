@@ -27,6 +27,51 @@
 
 The UI is a **React** app (Vite + TypeScript + Plotly) talking to a local **FastAPI** backend (`talenthawk/web_api.py`).
 
+### Architecture (high level)
+
+```mermaid
+flowchart LR
+  subgraph UI["Browser"]
+    R["React + Plotly\n(Vite, web/)"]
+  end
+
+  subgraph API["FastAPI — talenthawk/web_api.py"]
+    S["Session state\n(jobs_raw, career rows, prefs)"]
+    V["viz_core\n(figures + filters + keywords)"]
+  end
+
+  subgraph JobsFeed["Jobs API feed"]
+    REM["Remotive API"]
+    SERP["SerpAPI\nGoogle Jobs"]
+    FC["Feed cache\ndata/jobs/feed/"]
+  end
+
+  subgraph Career["Career tracker"]
+    MAP["career_page_mappings.json"]
+    FT["Pluggable fetchers\n(career_page_tracker.py)"]
+    CC["Per-company cache\ndata/jobs/career/"]
+  end
+
+  subgraph Disk["Local persistence"]
+    P["data/persistence/*.json\n(filters, prefs, visualize hide)"]
+  end
+
+  R -->|"/api/*"| S
+  S --> V
+  V --> R
+
+  S --> REM
+  S --> SERP
+  S <--> FC
+
+  S --> MAP
+  MAP --> FT
+  FT <--> CC
+  S <--> CC
+
+  S <--> P
+```
+
 ---
 
 ## Quick start
@@ -92,6 +137,7 @@ Open **http://127.0.0.1:8000** (serves the built app when `web/dist` exists).
 | `category_filter.json` | Lines matched against the **inferred category** label. |
 | `serpapi_prefs.json` | **SerpAPI** search **query** and **location** — saved when you **Refresh jobs**. |
 | `career_page_tracker_filter.json` | Subset of company ids for the **Career page tracker** (saved from the sidebar multiselect). |
+| `visualize_hide_words.json` | Words hidden only in the **Visualize** word cloud (`jobs` / `career` lists). |
 
 **`data/mappings/`** (versioned defaults in repo)
 
