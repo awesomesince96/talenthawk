@@ -1,8 +1,15 @@
 .shell {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
   max-width: 100%;
   text-align: left;
+}
+
+.shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .sidebar {
@@ -14,10 +21,137 @@
   overflow-y: auto;
 }
 
-.sidebar h1 {
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.brand-row h1 {
   font-size: 1.25rem;
-  margin: 0 0 0.75rem;
+  margin: 0;
   letter-spacing: normal;
+  flex: 1;
+  min-width: 0;
+}
+
+.help-btn {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: help;
+}
+
+.help-btn:hover,
+.help-btn:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  outline: none;
+}
+
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  box-sizing: border-box;
+  background: color-mix(in oklab, var(--text-h) 35%, transparent);
+}
+
+.help-panel {
+  width: min(34rem, 100%);
+  max-height: min(32rem, 85vh);
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  box-shadow: 0 12px 40px color-mix(in oklab, var(--text-h) 25%, transparent);
+}
+
+.help-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.help-panel-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.help-close {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.1rem 0.45rem;
+  font-size: 1.35rem;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-h);
+  opacity: 0.75;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.help-close:hover,
+.help-close:focus-visible {
+  opacity: 1;
+  background: var(--code-bg);
+  outline: none;
+}
+
+.help-panel-body {
+  padding: 0.85rem 1rem 1.1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.help-panel-body p {
+  margin: 0 0 0.75rem;
+}
+
+.help-panel-body ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.help-panel-body li {
+  margin-bottom: 0.55rem;
+}
+
+.help-panel-body li:last-child {
+  margin-bottom: 0;
+}
+
+.help-panel-body code.mono {
+  font-size: 0.82em;
 }
 
 .main {

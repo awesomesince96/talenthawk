@@ -152,9 +152,63 @@ function truncate(s: string, n: number) {
   return t.slice(0, n - 1) + '…'
 }
 
+function HelpAboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null
+  return (
+    <div className="help-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="help-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-about-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="help-panel-head">
+          <h2 id="help-about-title">What TalentHawk does</h2>
+          <button type="button" className="help-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="help-panel-body">
+          <p>
+            TalentHawk helps you explore job postings: filter them, spot keyword patterns in titles and descriptions, and open
+            original listings. Everything runs in your browser against a local FastAPI server; listings and preferences are cached on
+            disk.
+          </p>
+          <ul>
+            <li>
+              <strong>Career page tracker</strong> — Pick companies in the sidebar, then <strong>Refresh career listings</strong> to
+              fetch roles from their career sites (with caching). Progress shows per company; you can <strong>Stop</strong> a long run.
+              Cached rows load first, then update as fetches finish.
+            </li>
+            <li>
+              <strong>Jobs API</strong> — Load aggregated feeds from <strong>Remotive</strong> and optionally <strong>SerpAPI</strong>{' '}
+              (Google Jobs; set <code className="mono">SERPAPI_API_KEY</code> on the server). Use <strong>Refresh jobs</strong> and
+              choose posted-within window and source. Feeds use a time-based cache unless you check fetch live.
+            </li>
+            <li>
+              <strong>Filters</strong> — Title ignore, title/company/category excludes (substring rules). Save title-ignore when you
+              change it.
+            </li>
+            <li>
+              <strong>Chart includes</strong> — Click chart bars or use <strong>+</strong> in keyword tables. Title words and summary
+              words combine with <strong>AND</strong>: a row must match every selected token. Clear buttons reset includes only.
+            </li>
+            <li>
+              <strong>Visualize</strong> — Word cloud from title + description keywords for the current Jobs or Career dataset. Min
+              count, search, and the visualize-only hide list (saved per source) trim noise.
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [boot, setBoot] = useState<Bootstrap | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [helpAboutOpen, setHelpAboutOpen] = useState(false)
   const [view, setView] = useState<'career' | 'jobs' | 'visualize'>('career')
   const [vizSource, setVizSource] = useState<'jobs' | 'career'>('career')
   const [vizHideJobs, setVizHideJobs] = useState<string[]>([])
@@ -206,6 +260,20 @@ export default function App() {
   useEffect(() => {
     reloadBootstrap().catch((e: Error) => setErr(String(e.message)))
   }, [reloadBootstrap])
+
+  useEffect(() => {
+    if (!helpAboutOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHelpAboutOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [helpAboutOpen])
 
   const loadJobsView = useCallback(async () => {
     const j = await postJobsView({
@@ -262,8 +330,20 @@ export default function App() {
           </button>
         </p>
       )}
+      <div className="shell-body">
       <aside className="sidebar">
-        <h1>TalentHawk</h1>
+        <div className="brand-row">
+          <h1>TalentHawk</h1>
+          <button
+            type="button"
+            className="help-btn"
+            title="What TalentHawk does"
+            aria-label="What TalentHawk does"
+            onClick={() => setHelpAboutOpen(true)}
+          >
+            ?
+          </button>
+        </div>
         <section className="block">
           <h2>Filters</h2>
           <p className="hint">
@@ -631,6 +711,8 @@ export default function App() {
           />
         )}
       </main>
+      </div>
+      <HelpAboutDialog open={helpAboutOpen} onClose={() => setHelpAboutOpen(false)} />
     </div>
   )
 }
